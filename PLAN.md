@@ -148,12 +148,38 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
 
 **Status:** pending
 
-- [ ] Ticket 3.1: Port `standards.lua` + the `lua54`/`lua54c` slice of
-      `builtin_standards/init.lua` to TS. Drop all other `lua_defs`, `min`, `max`, `busted`,
-      `rockspec`, `luacheckrc`, `ldoc`, `sile`, `ngx_lua`, `luajit` data per the std-scope
-      decision.
-  - Eval: ported `standards_spec.lua` passes under `deno test` (scoped to lua54-relevant
-    cases; note any cases dropped because they test excluded presets).
+- [x] Ticket 3.1: Port `standards.lua` + the `lua54`/`lua54c` slice of
+      `builtin_standards/init.lua` to TS (`src/standards.ts`, `src/builtin_standards.ts`).
+      Dropped all other `lua_defs`, `min`, `max`, `busted`, `rockspec`, `luacheckrc`, `ldoc`,
+      `sile`, `ngx_lua`, `luajit` data per the std-scope decision. Traced the real chain
+      backward from `lua54`/`lua54c` (`lua54c = addDefs(lua54, ...)`, `lua54 =
+      addDefs(lua53, ...)`, `lua53 = addDefs(makeMinDef("lua53"), ...)`, which reads
+      `stringDefs.lua53`/`fileDefs.lua53`), so `def_to_std`, `add_defs`, `make_min_def`, and
+      only the `"lua53"`/`"min"`-named entries of `string_defs`/`file_defs` were ported —
+      `bit32_def` and every other Lua-version entry those maps held upstream were dropped as
+      unreachable from this chain. `get_running_lua_std_name` and the interpreter-inspection
+      export dropped (meaningless in a browser port). Snake_case data-format keys (`fields`,
+      `read_only`, `other_fields`, `deep_read_only`, `globals`, `read_globals`) kept literal
+      per the "public API mirrors luacheck 1:1" decision; only function/variable identifiers
+      were camelCased. Lua's array-part-of-a-table-as-field-name-sugar is represented with
+      decimal-string object keys (`"0"`, `"1"`, ...), the same convention ticket 2.3 already
+      established for AST array-parts, rather than a second convention.
+  - Eval: ported `standards_spec.lua` (290 lines) passes under `deno test` — exercises only
+    the generic `standards.ts` API (`validateStdTable`/`addStdTable`/`overwriteField`/
+    `removeField`/`finalize`/`defFields`), never `builtin_standards.ts`. The `lua54`/`lua54c`
+    table content itself has **no spec coverage** from this ticket (a pre-existing gap:
+    upstream's own spec suite never tests `builtin_standards/init.lua`'s data directly
+    either) — sanity-checked once with a throwaway, uncommitted script confirming expected
+    keys (`warn`, `math.atan2`, `coroutine.close`, `table.move`, `utf8.codepoint`,
+    `string.pack`, `_ENV`) are present and out-of-scope keys (`bit32`, `getfenv`) are absent;
+    this will get real exercise once `options.lua` (ticket 3.3) and `check.lua` (Phase 5)
+    consume it. Whole-project `deno test` (16 tests/142 steps), `deno lint`, `deno fmt
+    --check`, `deno check` all clean.
+  - Note: dispatched to a `build` subagent, same as ticket 2.3. Completed in one pass.
+    Independently re-verified in the primary session: reran `deno test`/`lint`/`fmt --check`/
+    `check` myself, confirmed line counts and `git status` matched the report exactly, and
+    spot-checked the `bit32_def`-dropped/`makeMinDef`/`lua54`+`lua54c`-export claims directly
+    in the source.
 - [ ] Ticket 3.2: Port `check_state.lua` + `core_utils.lua` to TS. Warning emission
       (`warn`/`warn_range`/`warn_var`), `eval_const_node`, `each_statement`,
       `sort_by_location`.
@@ -206,7 +232,7 @@ tracked only.
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 1 / 3 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked the `build` subagent's report claims against the actual source after it reported done, all claims matched, no discrepancy found |
+| Verification catch rate | 1 / 4 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3 and ticket 3.1: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked each `build` subagent's report claims against the actual source after it reported done, all claims matched both times, no discrepancy found |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |
