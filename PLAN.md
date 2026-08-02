@@ -180,12 +180,31 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
     `check` myself, confirmed line counts and `git status` matched the report exactly, and
     spot-checked the `bit32_def`-dropped/`makeMinDef`/`lua54`+`lua54c`-export claims directly
     in the source.
-- [ ] Ticket 3.2: Port `check_state.lua` + `core_utils.lua` to TS. Warning emission
-      (`warn`/`warn_range`/`warn_var`), `eval_const_node`, `each_statement`,
-      `sort_by_location`.
-  - Eval: no dedicated upstream spec for either file; exercised indirectly once `check.lua`
-    lands in Phase 5. Manual smoke check now: a hand-written small Lua snippet round-trips
-    through parser → check_state warn calls without throwing.
+- [x] Ticket 3.2: Port `check_state.lua` + `core_utils.lua` to TS (`src/check_state.ts`,
+      166 lines; `src/core_utils.ts`, 193 lines; `src/core_utils_test.ts`, 119 lines, 15 hand-
+      written test steps since no upstream spec exists). Warning emission
+      (`warn`/`warn_range`/`warn_var`/`warn_value`/`warn_column_range`), `eval_const_node`,
+      `each_statement`, `sort_by_location`.
+  - Eval: no dedicated upstream spec for either file. `evalConstNode` and `sortByLocation`
+    (the two pieces with no un-ported dependency) got hand-written Deno tests instead.
+    `eachStatement` and `check_state.ts` stay untested this ticket — both need `chstate.lines`,
+    which `stages/linearize.lua` (not yet ported) populates; exercised indirectly once
+    `check.lua` lands in Phase 5.
+  - Note: `eval_const_node`'s Lua-numeral parsing needs a hand-rolled hex-float path
+    (`0x1p4`, `0x1.8p3`), since JS's `Number()` does not parse Lua's `p`/`P` binary-exponent
+    hex-float syntax. The `build` subagent caught and reported one real correctness gap in
+    its own first draft: the brief said to detect hex floats by a `p`/`P` exponent alone, but
+    upstream always appends a bare `.0` to integer-looking numerals before parsing (to force
+    float evaluation), so a plain hex integer like `"0x1F"` arrives as `"0x1F.0"` — a radix
+    point with no `p` exponent, which real Lua accepts (implicit exponent 0) but the brief's
+    narrower detection would have wrongly rejected. Fixed by detecting on `.` or `p`/`P`.
+    Independently verified this and the general port against `/usr/bin/lua` (Lua 5.4.8) and a
+    live `deno run` probe of `evalConstNode`: `tonumber("0x1F.0")`, `tonumber("0x1p4")`,
+    `tonumber("0x1.8p3")`, `tonumber("0x.8p1")`, and `tonumber("1LL")` all matched the ported
+    function's output exactly (`31`, `16`, `12`, `1`, `undefined`/`nil`) for both the raw
+    `luaNumeralToNumber` cases and the full `evalConstNode` pipeline (including negation via
+    `Op`/`unm`-wrapped `Number` nodes). Also reran `deno test`/`lint`/`fmt --check`/`check`
+    myself and confirmed `git status` matched the report (only the three new files touched).
 - [ ] Ticket 3.3: Port `options.lua` (trimmed: no `compat`/`max` path, no CLI-only options) to
       TS. Option validation + normalization into the std tree, rule set, line-length options.
   - Eval: ported `options_spec.lua` passes under `deno test`, scoped to lua54/kept-option
@@ -232,7 +251,7 @@ tracked only.
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 1 / 4 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3 and ticket 3.1: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked each `build` subagent's report claims against the actual source after it reported done, all claims matched both times, no discrepancy found |
+| Verification catch rate | 1 / 5 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3 and ticket 3.1: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked each `build` subagent's report claims against the actual source after it reported done, all claims matched both times, no discrepancy found. Ticket 3.2: independently cross-checked `evalConstNode`'s hex-float numeral parsing against `/usr/bin/lua` (5.4.8) and a live `deno run` probe across 6 cases, all matched exactly; the subagent itself (not this verification pass) had already caught and fixed one real gap in its own first draft (hex-float detection too narrow for the `.0`-append case) |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |
