@@ -1,0 +1,15 @@
+# Node artifacts (defensive; this project is Deno-first)
+node_modules/
+
+# Deno build artifacts
+dist/
+
+# Deno cache / local env
+.deno/
+.env
+
+# Scratch vendoring dir for the upstream luacheck 1.2.0 clone (never committed)
+.reference/
+
+# OS junk
+.DS_Store

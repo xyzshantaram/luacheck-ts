@@ -26,18 +26,22 @@ source, then hand type-annotation/cleanup, preserving upstream analysis behavior
 - **Public API:** mirrors luacheck's Lua API 1:1 — same option names (`globals`, `read_globals`,
   `std`, `unused_secondaries`, `max_line_length`, etc.), same warning data. Warning objects are
   a discriminated union keyed by numeric code (each code's type carries exactly its own fields).
-- **Package:** `luacheck-ts`, MIT license. JSR scope TBD at actual publish time.
+- **Package:** `@xyzshantaram/luacheck-ts`, MIT license, published to JSR under that scope.
 - **Toolchain:** Deno (`deno.json`, `deno test`, `deno lint`, `deno fmt`). Browser build via
-  `deno bundle` (stdout). ESM only, ES2020+ target. Publish to JSR.
+  `deno bundle --platform=browser --minify` (Deno 2.8 experimental bundler, confirmed working).
+  ESM only, ES2020+ target. Publish to JSR.
 
 ## Phase 0 — Project scaffolding
 
-**Status:** in_progress
+**Status:** done
 
-- [ ] Ticket 0.1: Init Deno project — `deno.json` with tasks for build/test/lint/fmt, empty
-      `src/mod.ts` entry point, `.gitignore`.
-  - Eval: `deno test` runs (0 tests, green); `deno bundle src/mod.ts` succeeds and prints valid
-    JS to stdout; `deno lint` and `deno fmt --check` pass on the scaffold.
+Scaffolded `deno.json` (build/test/lint/fmt tasks, strict TS, ES2020+DOM lib), `src/mod.ts`
+placeholder entry point, `src/mod_test.ts` placeholder test, MIT `LICENSE`, `.gitignore`
+(ignores `dist/`, `.reference/`, Node/OS junk). Fixed two discrepancies found on verification:
+package name wasn't JSR-scoped, and the `build` task used `npm:esbuild` instead of `deno bundle`
+— both corrected. Verified directly: `deno test` (0 passed/0 failed), `deno lint` and
+`deno fmt --check` clean, `deno task build` produces a working minified ESM bundle at
+`dist/luacheck-ts.bundle.js`.
 
 ## Phase 1 — Research & survey
 
@@ -100,7 +104,7 @@ Eval: report gzipped bundle size after `deno bundle`; no hard ceiling, tracked o
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 0 / 0 | independent checks that caught a real discrepancy, vs. total checks performed |
+| Verification catch rate | 1 / 1 | Phase 0 review caught unscoped JSR name + esbuild-instead-of-deno-bundle before marking done |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |
