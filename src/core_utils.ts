@@ -7,17 +7,17 @@
  * `core_utils.lua _VERSION branch"). This port targets Lua 5.4 only, so
  * that branch collapses to an unconditional step here.
  *
- * `each_statement` walks `chstate.lines`, a field populated by
- * stages/linearize.lua. That file is not yet ported (see PORT_NOTES.md
- * section 4, `core_utils.lua` row). `eachStatement` below takes a minimal
- * forward-declared `LineLike` shape instead of importing a real `Line`
- * type, and will need reconciling once linearize.lua lands.
+ * `eachStatement` walks `chstate.lines`, a field populated by
+ * stages/linearize.ts (ticket 4.2); it takes a minimal structural
+ * `{ lines: LineInstance[] }` shape rather than the full
+ * `CheckStateInstance`, since that's all it needs.
  */
 
 import type { AstNode } from "./parser.ts";
 import { decode } from "./decoder.ts";
 import { arrayToSet } from "./utils.ts";
 import type { Warning } from "./check_state.ts";
+import type { LineInstance } from "./stages/linearize.ts";
 
 /**
  * Parses a Lua numeral string to a JS number. `Number()` handles plain
@@ -122,15 +122,6 @@ const statementContainingTags = arrayToSet([
   "If",
 ]);
 
-/**
- * Minimal forward-declared shape of a linearized "line" object. The full
- * Line type comes from stages/linearize.lua, not yet ported. This is only
- * the slice eachStatement needs.
- */
-interface LineLike {
-  node: AstNode;
-}
-
 /** Length of an AST node's 1-based array part (mirrors parser.ts's private `astLen`). */
 function astLen(node: AstNode): number {
   let n = 0;
@@ -163,7 +154,7 @@ function scanForStatements<Args extends unknown[]>(
 
 /** Calls `callback(chstate, node, ...)` for each statement node within the AST with tag in the given array. */
 export function eachStatement<Args extends unknown[]>(
-  chstate: { lines: LineLike[] },
+  chstate: { lines: LineInstance[] },
   tagsArray: string[],
   callback: (chstate: unknown, item: AstNode, ...args: Args) => void,
   ...args: Args

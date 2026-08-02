@@ -5,12 +5,18 @@
  * `lineOffsets`, `lineLengths`, `source`, `ast`, `comments`, `codeLines`,
  * `lineEndings`, and `hangingSemicolons` are not set here. `stages/parse.ts`
  * sets them after construction, once fed from parser.parse()'s output.
- * This mirrors upstream, where `CheckState:__init` sets only `source_bytes`
- * and `warnings`.
+ * `topLine` and `lines` are likewise not set here: `stages/linearize.ts`
+ * sets them. This mirrors upstream, where `CheckState:__init` sets only
+ * `source_bytes` and `warnings`.
+ *
+ * The `LineInstance` import below is type-only, so it doesn't create a
+ * runtime circular dependency even though `stages/linearize.ts` itself
+ * imports `CheckStateInstance` from this file.
  */
 
 import type { AstNode, CommentEntry, Range } from "./parser.ts";
 import type { Chars } from "./decoder.ts";
+import type { LineInstance } from "./stages/linearize.ts";
 import { class as classImpl } from "./utils.ts";
 
 /**
@@ -50,6 +56,8 @@ export interface CheckStateInstance {
   codeLines: Record<number, boolean>;
   lineEndings: Record<number, "comment" | "string">;
   hangingSemicolons: Range[];
+  topLine: LineInstance;
+  lines: LineInstance[];
   offsetToColumn(line: number, offset: number): number;
   warnColumnRange(
     code: number,

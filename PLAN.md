@@ -294,8 +294,46 @@ Phase 3 baseline).
     under `/usr/bin/lua` (5.4.8) against six source snippets and diffing AST dumps
     before/after `unwrap_parens.run`, including `local x = not (a == b)` (the exact case the
     fix targets) — all six matched the ported behavior exactly.
-- [ ] Ticket 4.2: Port `linearize.lua` (747 lines) solo. Implemented directly, not dispatched.
-      Ported `linearize_spec.lua` (406 lines) as the correctness oracle.
+- [x] Ticket 4.2: Port `linearize.lua` (747 lines) to TS (`src/stages/linearize.ts`, 1103
+      lines — the type declarations for `Var`/`Value`/`Item`/`LineInstance`/`LinStateInstance`
+      account for most of the growth over the untyped Lua original). Solo, implemented
+      directly, not dispatched. Ported `linearize_spec.lua` (406 lines) as
+      `src/stages/linearize_test.ts` (433 lines; one Deno test per busted `describe` block,
+      one `t.step` per `it`, same convention as 3.1-3.3). Extended `CheckStateInstance`
+      with `topLine`/`lines` (both typed `LineInstance`, imported `type`-only from
+      `stages/linearize.ts` — no runtime circular dependency even though `linearize.ts`
+      imports `CheckStateInstance` back, since both sides only need the types). Updated
+      `core_utils.ts`'s `eachStatement` to take the real `LineInstance[]` instead of the
+      `LineLike` placeholder it was carrying since ticket 3.2.
+      Exports `LineInstance`, `Var`, `Value`, `Item` (a `Jump`/`Cjump`/`Eval`/`Local`/`Set`/
+      `OpSet` discriminated union) and `run` for the not-yet-ported `resolve_locals.lua` and
+      `detect_*.lua` stages to consume via `chstate.lines`/`chstate.topLine`. Two Lua naming
+      traps documented in the file header: a `Var`'s `line` field is the enclosing
+      `LineInstance` (function scope), not a source line number; and `LinState.lines`/
+      `.scopes` are `Stack`s shared across every nested `buildLine` call, not one per
+      function, which is how `leaveScope` distinguishes an unresolved goto/break from one
+      that escaped its own function. `LocalItem.accesses`/`.usedValues`/`.lines` are always
+      a `Map`/array here rather than upstream's `node[2] and {}` (`undefined` when a `local`
+      has no initializer): verified the only downstream Lua consumer (`resolve_locals.lua`)
+      only ever does a truthy-AND-lookup or an unconditional iterate, both of which already
+      behave identically against an empty `Map`/array, so this drops several `Item` fields
+      from optional to required without changing behavior. A few upstream `assert()` calls
+      guarding grammar-guaranteed invariants with no bearing on control flow (e.g.
+      `assert(expr.tag == "Index")` after ruling out `"Id"`) are dropped per this port's
+      "trust internal guarantees" convention; the two balanced-stack assertions at the end
+      of `stage.run` are kept as a real runtime check.
+  - Eval: whole-project `deno test` (42 tests/176 steps, up from 41/154), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected
+    file set exactly (`check_state.ts`, `core_utils.ts` modified; `src/stages/linearize.ts`
+    and `src/stages/linearize_test.ts` new). All 22 of `linearize_spec.lua`'s ported steps
+    passed on the first run.
+  - Note: `linearize_spec.lua` does not itself exercise the 411-433 redefinition warnings
+    (only syntax errors and control-flow/value-registration shape). Ground-truthed
+    `warnRedefined`'s three-branch code computation (same-scope / same-function-different-
+    scope / different-function-upvalue, crossed with `var`/`arg`/`loop` type codes) against
+    the real vendored `linearize.lua` under `/usr/bin/lua` (5.4.8) with seven snippets
+    covering all seven reachable codes (411, 412, 413, 421, 431, 432, 433); all seven
+    matched the ported behavior exactly (same code, line, column, and variable name).
 - [ ] Ticket 4.3: Port `parse_inline_options.lua` (351 lines) + `name_functions.lua` (71 lines)
       + `resolve_locals.lua` (273 lines). `parse_inline_options` and `name_functions` have no
       upstream spec — hand-written tests. `resolve_locals_spec.lua` (159 lines) ported for
