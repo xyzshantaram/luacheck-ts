@@ -334,10 +334,35 @@ Phase 3 baseline).
     the real vendored `linearize.lua` under `/usr/bin/lua` (5.4.8) with seven snippets
     covering all seven reachable codes (411, 412, 413, 421, 431, 432, 433); all seven
     matched the ported behavior exactly (same code, line, column, and variable name).
-- [ ] Ticket 4.3: Port `parse_inline_options.lua` (351 lines) + `name_functions.lua` (71 lines)
-      + `resolve_locals.lua` (273 lines). `parse_inline_options` and `name_functions` have no
-      upstream spec — hand-written tests. `resolve_locals_spec.lua` (159 lines) ported for
-      `resolve_locals.lua`.
+- [x] Ticket 4.3: Port `parse_inline_options.lua` (351 lines) to TS (`src/stages/parse_inline_options.ts`,
+      500 lines) + `name_functions.lua` (71 lines) to TS (`src/stages/name_functions.ts`, 106 lines)
+      + `resolve_locals.lua` (273 lines) to TS (`src/stages/resolve_locals.ts`, 399 lines).
+      `parse_inline_options` and `name_functions` have no upstream spec - hand-written tests
+      (`src/stages/parse_inline_options_test.ts`, 185 lines; `src/stages/name_functions_test.ts`,
+      112 lines). `resolve_locals_spec.lua` (159 lines) ported as `src/stages/resolve_locals_test.ts`
+      (190 lines), following the `linearize_test.ts` one-`Deno.test`-per-`describe`,
+      one-`t.step`-per-`it` convention. `resolve_locals.ts` uses a local
+      `ResolvedValue = Value & {used?, mutated?, overwritingItem?}` type instead of widening
+      `linearize.ts`'s exported `Value`, since those fields are write-only analysis state this
+      stage adds, not part of `linearize`'s own output shape. `parse_inline_options.ts` needed
+      two small from-scratch helpers with no existing port to reuse: `removeBalancedParens`
+      (Lua's `%b()` gsub pattern, explicitly out of scope for `lua_pattern.ts`) and a narrow
+      `luaToNumber` (decimal/hex-integer only, for the numeric limit-option arguments).
+      Extended `CheckStateInstance` with `InlineOptionsEntry` (`line`, `pop_count?`, `options?`,
+      `column?`, `end_column?`) and an optional `inlineOptions?: InlineOptionsEntry[]` field.
+  - Eval: whole-project `deno test` (56 tests/184 steps, up from 42/176), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file
+    set exactly (`check_state.ts` modified; six new `src/stages/` files). All three new test
+    files passed in full on the implementation dispatch's first attempt, no test-file bugs found.
+  - Note: dispatched as two separate `build` subagent calls (test-writing, then implementation
+    against those tests), per this phase's split-dispatch convention. Independently ground-truthed
+    `parse_inline_options.lua`'s function-boundary/inline-push interaction - the trickiest part of
+    that file, since a function's implicit pop can silently swallow an unpaired inline `push` left
+    open inside it - against the real vendored `parse_inline_options.lua` under `/usr/bin/lua`
+    (5.4.8), using a snippet with an inline `push` left open inside a function body plus a
+    separate top-level `ignore` directive. Both the emitted 022 warning (line/column) and the
+    resulting `inline_options` array (including the `ignore` option's argument array) matched the
+    TS port exactly.
 - [ ] Ticket 4.4: Port `detect_unused_locals.lua` (335 lines) solo, largest single detect_*
       stage. Ported `unused_locals_spec.lua` (394 lines).
 - [ ] Ticket 4.5: Port `detect_globals.lua` (252 lines) + `detect_uninit_accesses.lua`

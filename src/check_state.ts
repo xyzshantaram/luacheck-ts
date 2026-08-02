@@ -17,6 +17,7 @@
 import type { AstNode, CommentEntry, Range } from "./parser.ts";
 import type { Chars } from "./decoder.ts";
 import type { LineInstance } from "./stages/linearize.ts";
+import type { Options } from "./options.ts";
 import { class as classImpl } from "./utils.ts";
 
 /**
@@ -45,6 +46,22 @@ interface WarnColumnRangeInput {
   end_column: number;
 }
 
+/**
+ * Placeholder shape for `chstate.inlineOptions`, added ahead of
+ * stages/parse_inline_options.ts (ticket 4.3) so ticket 4.3's tests can
+ * compile against a real field instead of an invented one. Mirrors
+ * `stage.inline_option_fields` from parse_inline_options.lua
+ * (`line`, `pop_count`, `options`, `column`, `end_column`); the ticket 4.3
+ * implementation dispatch may adjust this.
+ */
+export interface InlineOptionsEntry {
+  line: number;
+  pop_count?: number;
+  options?: Options;
+  column?: number;
+  end_column?: number;
+}
+
 export interface CheckStateInstance {
   sourceBytes: string;
   warnings: Warning[];
@@ -58,6 +75,7 @@ export interface CheckStateInstance {
   hangingSemicolons: Range[];
   topLine: LineInstance;
   lines: LineInstance[];
+  inlineOptions?: InlineOptionsEntry[];
   offsetToColumn(line: number, offset: number): number;
   warnColumnRange(
     code: number,
