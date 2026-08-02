@@ -19,6 +19,8 @@
  * already established for AST nodes in parser.ts.
  */
 
+import { luaType } from "./utils.ts";
+
 export interface FieldDef {
   read_only?: boolean;
   other_fields?: boolean;
@@ -31,15 +33,6 @@ export type FieldsTable = Record<string, FieldDef | string>;
 export interface StdTable {
   globals?: FieldsTable;
   read_globals?: FieldsTable;
-}
-
-function luaType(value: unknown): string {
-  if (value === undefined || value === null) return "nil";
-  if (typeof value === "boolean") return "boolean";
-  if (typeof value === "number") return "number";
-  if (typeof value === "string") return "string";
-  if (typeof value === "function") return "function";
-  return "table";
 }
 
 function isArrayIndexKey(key: string): boolean {

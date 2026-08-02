@@ -146,7 +146,7 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
 
 ## Phase 3 — Std data & check infrastructure
 
-**Status:** pending
+**Status:** done
 
 - [x] Ticket 3.1: Port `standards.lua` + the `lua54`/`lua54c` slice of
       `builtin_standards/init.lua` to TS (`src/standards.ts`, `src/builtin_standards.ts`).
@@ -205,10 +205,47 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
     `luaNumeralToNumber` cases and the full `evalConstNode` pipeline (including negation via
     `Op`/`unm`-wrapped `Number` nodes). Also reran `deno test`/`lint`/`fmt --check`/`check`
     myself and confirmed `git status` matched the report (only the three new files touched).
-- [ ] Ticket 3.3: Port `options.lua` (trimmed: no `compat`/`max` path, no CLI-only options) to
-      TS. Option validation + normalization into the std tree, rule set, line-length options.
-  - Eval: ported `options_spec.lua` passes under `deno test`, scoped to lua54/kept-option
-    cases.
+- [x] Ticket 3.3: Port `options.lua` (trimmed: no `compat`/`max` path, no CLI-only options) to
+      TS (`src/options.ts`, 615 lines; `src/options_test.ts`, 261 lines). Option validation,
+      std-tree normalization, rule-set building, line-length options. Default std is now
+      `lua54` (the dropped `compat` option previously pulled in the dropped `max` preset). Also
+      moved `luaType` out of `standards.ts` into `utils.ts` (exported; `options.ts` is its
+      second consumer) and added `hasType`/`hasTypeOrFalse`/`arrayOf` validator factories
+      there, ported from `utils.lua`'s `has_type`/`has_type_or_false`/`array_of`
+      (`has_either_type` dropped — no caller in the kept port).
+  - Eval: ported `options_spec.lua`, rewritten per the ticket brief (two upstream tests relied
+    on the dropped `compat` option and dropped std presets `none`/`max`/`lua51`/`lua52`/
+    `lua53`/`luajit`; replaced with ground-truth-verified equivalents exercising the same std
+    override/union/addition behavior against only the `lua54`/`lua54c` presets this port
+    ships), passes as 10 test steps under `deno test`. Whole-project `deno test` (32
+    tests/154 steps), `deno lint`, `deno fmt --check`, `deno check` all clean.
+  - Note: dispatched to a `build` subagent (same as tickets 2.3, 3.1). Before dispatch,
+    computed ground truth for every spec case touching a dropped std preset by running the
+    real, unmodified vendored source directly under `/usr/bin/lua` (5.4.8), via
+    `package.path` pointed at `.reference/luacheck/src`, so the substitute test values in the
+    brief were verified rather than guessed. This also caught a pre-existing, upstream-only
+    bug: two of `options_spec.lua`'s own tests ("allows compound std unions", "allows std
+    addition") assert on `options.normalize(...).globals`, a field `options.normalize` never
+    sets (confirmed `nil` on both sides of both comparisons against the real interpreter) — so
+    both tests pass no matter what `std` resolves to and test nothing. Not a port artifact:
+    confirmed against the unmodified 1.2.0 source. Rewrote both to assert on `.std` (what the
+    test names actually claim to check) instead of porting the no-op assertions verbatim.
+    Independently re-verified after the subagent reported done: reran `deno test`/`lint`/
+    `fmt --check`/`check` and `git status --short` myself (matched the report exactly), read
+    the full `options.ts`/`options_test.ts` source directly against the real Lua source read
+    earlier in this same session, and confirmed the `compat`/`max` trim, the `stds.lua54`
+    default fallback, the `globals`/`read_globals` array-part-only consumption in
+    `getFinalStd`, and every rewritten test's expected value all matched what independent
+    ground-truth verification against the real interpreter established. Two subtleties the
+    subagent flagged and both checked out as faithful, not shortcuts: (1) `getFinalStd`'s
+    array-part-only `ipairs` walk only covers the ordered `overwriteField` calls — the same
+    function's later `addStdTable(..., true, true)` call separately applies the *named-key*
+    part of the same `globals`/`read_globals` tables, so both parts of a table do end up
+    applied, just via two different code paths, matching upstream; (2) `NormalizedOptions.std`
+    is typed `StdTable` (matching the ticket brief), though the value it holds at runtime is
+    `FieldDef`-shaped — harmless (both `StdTable` fields are optional, so `FieldDef` values
+    satisfy it structurally), but `FieldDef` would be the more precise type; left as `StdTable`
+    to match the brief, worth revisiting when `check.lua` starts consuming this.
 
 ## Phase 4 — Stages (analysis engine)
 
@@ -251,7 +288,7 @@ tracked only.
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 1 / 5 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3 and ticket 3.1: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked each `build` subagent's report claims against the actual source after it reported done, all claims matched both times, no discrepancy found. Ticket 3.2: independently cross-checked `evalConstNode`'s hex-float numeral parsing against `/usr/bin/lua` (5.4.8) and a live `deno run` probe across 6 cases, all matched exactly; the subagent itself (not this verification pass) had already caught and fixed one real gap in its own first draft (hex-float detection too narrow for the `.0`-append case) |
+| Verification catch rate | 1 / 6 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3 and ticket 3.1: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked each `build` subagent's report claims against the actual source after it reported done, all claims matched both times, no discrepancy found. Ticket 3.2: independently cross-checked `evalConstNode`'s hex-float numeral parsing against `/usr/bin/lua` (5.4.8) and a live `deno run` probe across 6 cases, all matched exactly; the subagent itself (not this verification pass) had already caught and fixed one real gap in its own first draft (hex-float detection too narrow for the `.0`-append case). Ticket 3.3: no discrepancy found in post-hoc verification of the subagent's work, but the pre-dispatch ground-truth pass (running the real vendored source under `/usr/bin/lua` before writing the brief, not the after-the-fact check this metric tracks) caught a real, pre-existing bug in upstream's own `options_spec.lua`: two tests asserted on a result field `options.normalize` never sets, so they passed regardless of the behavior under test |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |

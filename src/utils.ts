@@ -3,12 +3,73 @@
  * are intentionally not ported: CLI-only filesystem/dynamic-code-loading
  * helpers, out of scope for a browser library (see
  * .reference/PORT_NOTES.md section 4). `unprefix`, `InvalidPatternError`,
- * `pmatch`, and the `has_type*`/`array_of` validator factories are deferred
- * to the options.lua ticket (3.3), which is the first thing that needs
- * them.
+ * and `pmatch` stay out of scope; `has_either_type` is dropped, since
+ * nothing in the kept `options.lua` port calls it.
  */
 
 import { luaFind, luaGmatch } from "./lua_pattern.ts";
+
+/** Returns the Lua type name of a JS value, following luacheck's own `nil`/`table` conventions. */
+export function luaType(value: unknown): string {
+  if (value === undefined || value === null) return "nil";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return "number";
+  if (typeof value === "string") return "string";
+  if (typeof value === "function") return "function";
+  return "table";
+}
+
+/** Returns a validator checking that a value has the given Lua type. */
+export function hasType(type_: string): (x: unknown) => [boolean, string?] {
+  return (x) => {
+    if (luaType(x) === type_) {
+      return [true];
+    }
+    return [false, `${type_} expected, got ${luaType(x)}`];
+  };
+}
+
+/** Returns a validator checking that a value has the given Lua type, or is `false`. */
+export function hasTypeOrFalse(
+  type_: string,
+): (x: unknown) => [boolean, string?] {
+  return (x) => {
+    if (luaType(x) === type_) {
+      return [true];
+    }
+    if (luaType(x) === "boolean") {
+      if (x === true) {
+        return [false, `${type_} or false expected, got true`];
+      }
+      return [true];
+    }
+    return [false, `${type_} or false expected, got ${luaType(x)}`];
+  };
+}
+
+/** Returns a validator checking that a value is an array with elements of the given Lua type. */
+export function arrayOf(type_: string): (x: unknown) => [boolean, string?] {
+  return (x) => {
+    if (luaType(x) !== "table") {
+      return [false, `array of ${type_}s expected, got ${luaType(x)}`];
+    }
+
+    const table = x as Record<string, unknown>;
+    for (let i = 1;; i++) {
+      const item = table[String(i)];
+      if (item === undefined) break;
+
+      if (luaType(item) !== type_) {
+        return [
+          false,
+          `array of ${type_}s expected, got ${luaType(item)} at index [${i}]`,
+        ];
+      }
+    }
+
+    return [true];
+  };
+}
 
 export function arrayToSet(array: string[]): Record<string, number> {
   const set: Record<string, number> = {};
