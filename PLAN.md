@@ -363,8 +363,40 @@ Phase 3 baseline).
     separate top-level `ignore` directive. Both the emitted 022 warning (line/column) and the
     resulting `inline_options` array (including the `ignore` option's argument array) matched the
     TS port exactly.
-- [ ] Ticket 4.4: Port `detect_unused_locals.lua` (335 lines) solo, largest single detect_*
-      stage. Ported `unused_locals_spec.lua` (394 lines).
+- [x] Ticket 4.4: Port `detect_unused_locals.lua` (335 lines) to TS (`src/stages/detect_unused_locals.ts`,
+      537 lines), solo, largest single detect_* stage. Ported `unused_locals_spec.lua` (394 lines)
+      as `src/stages/detect_unused_locals_test.ts` (560 lines), following the established
+      one-`Deno.test`-per-`describe`, one-`t.step`-per-`it` convention (upstream's second
+      `describe` block name is misspelled - "unused recurisve function detection" - and was
+      corrected in the ported test name, since it is not user-facing output). Exported
+      `resolve_locals.ts`'s previously-local `ResolvedValue` type (adding one `export` keyword,
+      no other change) so this stage could reuse it instead of redefining an equivalent type.
+      This stage's own `stage.warnings` table needed a wider local type than the plain-string
+      `message_format` used by every prior stage, since several of its entries
+      (`unused_local_message_format`, `unused_arg_message_format`, and the two closures
+      `unused_or_overwritten_warning` returns) are Lua functions, not strings.
+      `setmetatable({}, {__index = marked})` + `rawget` (the closure-usage graph's per-candidate
+      overlay-table trick, with no direct JS equivalent) was unpacked into a `markReachableLines`
+      helper taking a written-and-iterated `marked: Set<LineInstance>` plus an optional read-only
+      `globallyMarked` set consulted only to short-circuit the DFS, reproducing the original's
+      read-sees-union/write-and-iterate-sees-overlay-only semantics explicitly. JS object literals
+      keep `undefined`-valued keys as own properties (unlike a Lua table constructor assigning
+      `nil`, which never creates the key), which the ported tests' `assertEquals` calls are
+      sensitive to; every warning-building call site with conditionally-absent fields now routes
+      through a small local `compact()` helper stripping `undefined`-valued keys before the object
+      reaches `warnValue`/`warnVar`.
+  - Eval: whole-project `deno test` (58 tests/212 steps, up from 56/184), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file set
+    exactly (`resolve_locals.ts` modified by exactly the one-word `export` addition, confirmed via
+    `git diff`; two new `src/stages/` files). All 28 test-file steps passed in full on the
+    implementation dispatch's first attempt, no test-file bugs found.
+  - Note: dispatched as two separate `build` subagent calls (test-writing, then implementation
+    against those tests), per this phase's split-dispatch convention. Independently
+    re-verified the full test/lint/fmt/check suite and `git status`/`git diff` after the
+    implementation dispatch, and spot-checked the `markReachableLines`/`globallyMarked` overlay
+    translation (the trickiest part of this file, given the Lua source's metatable/`rawget`
+    indirection) against both the implementation report's description and the actual code -
+    matches the original's semantics exactly.
 - [ ] Ticket 4.5: Port `detect_globals.lua` (252 lines) + `detect_uninit_accesses.lua`
       (54 lines). Ported `globals_spec.lua` (143 lines) + `uninit_accesses_spec.lua`
       (125 lines).

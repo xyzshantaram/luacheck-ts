@@ -39,7 +39,7 @@ function astLen(node: AstNode): number {
 }
 
 /** Fields resolve_locals.lua adds to a `Value` at analysis time. */
-type ResolvedValue = Value & {
+export type ResolvedValue = Value & {
   used?: boolean;
   mutated?: boolean;
   overwritingItem?: LocalItem | SetItem | false;
