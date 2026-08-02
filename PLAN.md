@@ -448,9 +448,41 @@ Phase 3 baseline).
     (the trickiest part of this file, given the Lua source's in-place parameter reassignment)
     directly against the vendored Lua source and the passing test's own column expectations -
     matches the original's semantics exactly.
-- [ ] Ticket 4.6: Port `detect_cyclomatic_complexity.lua` (159 lines) +
-      `detect_unreachable_code.lua` (36 lines). Ported `cyclomatic_complexity_spec.lua`
-      (236 lines) + `unreachable_code_spec.lua` (126 lines).
+- [x] Ticket 4.6: Port `detect_cyclomatic_complexity.lua` (159 lines) to TS
+      (`src/stages/detect_cyclomatic_complexity.ts`, 310 lines) + `detect_unreachable_code.lua`
+      (36 lines) to TS (`src/stages/detect_unreachable_code.ts`, 64 lines). Ported
+      `cyclomatic_complexity_spec.lua` (236 lines) as `src/stages/detect_cyclomatic_complexity_test.ts`
+      (415 lines, 7 `t.step`s) + `unreachable_code_spec.lua` (126 lines) as
+      `src/stages/detect_unreachable_code_test.ts` (142 lines, 6 `t.step`s), following the
+      established one-`Deno.test`-per-`describe`, one-`t.step`-per-`it` convention.
+      `detect_cyclomatic_complexity.lua`'s `CyclomaticComplexityMetric` (an upstream
+      `utils.class()`) ported as a `classImpl<CyclomaticComplexityMetricInstance>()` class with
+      `calcStmt${tag}`/`calcItem${tag}` template-string method dispatch, mirroring
+      `linearize.ts`'s `emitStmt${tag}`/`scanExpr${tag}` dispatch precedent; only the five
+      statement tags and three item tags upstream actually handles get a method, matching a
+      genuine upstream quirk where e.g. `OpSet` items are silently skipped for complexity
+      (preserved as-is, not "fixed"). The main-chunk warning path calls `chstate.warn(561, 1, 1,
+      1, ...)` with literal `offset`/`endOffset` of `1` (not AST-derived), confirmed correct
+      against `lexer.ts`'s `state.lineOffsets[1] = 1` making `offsetToColumn(1, 1) === 1`, matching
+      the "reports 1 for empty main chunk" test's `column: 1, end_column: 1`. `function_name`
+      (from `node.name`, set by `name_functions.ts`) routes through this ticket's own local
+      `compact()` helper (ticket 4.4/4.5 precedent) since it is `undefined` for anonymous
+      functions and several expected warnings in the "provides appropriate names and types for
+      functions" test omit the key entirely. `detect_unreachable_code.ts` is a small, direct port
+      reusing `LineInstance.walk` (already implemented by `linearize.ts`) unchanged; narrows the
+      `Item` union via `"node" in item` before reading `item.node`/`item.loopEnd`, per this
+      codebase's existing narrowing idiom (`detect_uninit_accesses.ts`'s `"accesses" in item`).
+  - Eval: whole-project `deno test` (62 tests/241 steps, up from 60/228), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file set
+    exactly - four new `src/stages/` files, no other files touched. All 13 test-file steps (7 + 6)
+    passed in full on the implementation dispatch's first attempt, no test-file bugs found.
+  - Note: dispatched as two separate `coder` subagent calls (test-writing, then implementation
+    against those tests, covering both stage files together per this ticket's own file grouping),
+    per this phase's split-dispatch convention. Independently re-ran the full test/lint/fmt/check
+    suite and `git status` after the implementation dispatch, and independently re-derived the
+    `CyclomaticComplexityMetric` dispatch/warning logic against the vendored Lua source before
+    dispatching (not just after), then confirmed the delivered implementation matched that
+    derivation line-for-line - the strongest form of this ticket's independent verification.
 - [ ] Ticket 4.7: Port the 7 smallest detect_* stages together: `detect_bad_whitespace`
       (76 lines), `detect_unused_fields` (81 lines), `detect_reversed_fornum_loops`
       (39 lines), `detect_empty_blocks` (36 lines), `detect_unbalanced_assignments`
