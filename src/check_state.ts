@@ -2,13 +2,15 @@
  * Ported from luacheck's check_state.lua: the `CheckState` object that
  * collects and stamps warnings during the check pipeline.
  *
- * `lineOffsets` and `lineLengths` are not set here. A later pipeline stage
- * (check.lua, not yet ported) sets them after construction, once fed from
- * parser.parse()'s output. This mirrors upstream, where `CheckState:__init`
- * sets only `source_bytes` and `warnings`.
+ * `lineOffsets`, `lineLengths`, `source`, `ast`, `comments`, `codeLines`,
+ * `lineEndings`, and `hangingSemicolons` are not set here. `stages/parse.ts`
+ * sets them after construction, once fed from parser.parse()'s output.
+ * This mirrors upstream, where `CheckState:__init` sets only `source_bytes`
+ * and `warnings`.
  */
 
-import type { Range } from "./parser.ts";
+import type { AstNode, CommentEntry, Range } from "./parser.ts";
+import type { Chars } from "./decoder.ts";
 import { class as classImpl } from "./utils.ts";
 
 /**
@@ -42,6 +44,12 @@ export interface CheckStateInstance {
   warnings: Warning[];
   lineOffsets: number[];
   lineLengths: number[];
+  source: Chars;
+  ast: AstNode;
+  comments: CommentEntry[];
+  codeLines: Record<number, boolean>;
+  lineEndings: Record<number, "comment" | "string">;
+  hangingSemicolons: Range[];
   offsetToColumn(line: number, offset: number): number;
   warnColumnRange(
     code: number,

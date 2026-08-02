@@ -249,13 +249,76 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
 
 ## Phase 4 — Stages (analysis engine)
 
-**Status:** pending
+**Status:** in_progress
 
-18 stage modules + the `stages/init.lua` registry, grouped by theme into tickets once we reach
-this phase (AST-prep stages: parse/unwrap_parens/linearize/parse_inline_options/
-name_functions/resolve_locals; structural detect_* stages; dataflow detect_* stages;
-registry last). Each stage has its own busted spec file already identified in
-`.reference/PORT_NOTES.md`. Exact ticket boundaries to be finalized when Phase 3 lands.
+18 stage modules + the `stages/init.lua` registry. Ticket boundaries grilled and finalized
+after Phase 3 landed, based on real line counts (`.reference/luacheck/src/luacheck/stages/*.lua`)
+and the canonical stage order in `stages/init.lua`. 4.1–4.3 must land before 4.4–4.7 (later
+stages depend on their output: `linearize` populates `chstate.lines`, `resolve_locals` binds
+identifiers); 4.4–4.7 can land in any order relative to each other; 4.8 (the registry) must be
+last since it requires all 18 stage modules to exist. Five stage modules have no dedicated
+upstream busted spec (only indirect coverage via `check_spec.lua`/`cli_spec.lua`); these get
+hand-written unit tests in their own ticket, same treatment as `core_utils.ts` in ticket 3.2.
+Dispatch strategy: split test-writing/implementation dispatches to the `build` subagent as in
+Phase 3, except ticket 4.2 (`linearize`), which is implemented directly given its size (747
+lines, the largest file in the whole port) and central role. Bundle-size probe deferred to the
+end of this phase (one measurement covering Phase 3+4 growth together, rather than a separate
+Phase 3 baseline).
+
+- [x] Ticket 4.1: Port `parse.lua` (19 lines) + `unwrap_parens.lua` (95 lines) to TS
+      (`src/stages/parse.ts`, 28 lines; `src/stages/unwrap_parens.ts`, 139 lines). First
+      ticket in the new `src/stages/` subdirectory. Extended `CheckStateInstance`
+      (`src/check_state.ts`) with six new fields `parse.ts` populates: `source`, `ast`,
+      `comments`, `codeLines`, `lineEndings`, `hangingSemicolons` (upstream's local variable
+      name for the sixth is `useless_semicolons`; kept the existing `hangingSemicolons` name
+      `parser.ts`'s `ParseResult` already uses for the same value, rather than introducing a
+      second name). `parse.ts` reads `lineOffsets`/`lineLengths` directly off the same
+      `parse()` call's return value rather than upstream's pre-allocate-then-out-param style,
+      since this port's `parse()` already returns fresh arrays either way.
+      `unwrap_parens.ts` has no upstream spec — hand-written tests, each built from a real
+      `parser.parse()` AST (not a hand-built fixture), covering: scalar-Paren unwrap, tail-Paren
+      preservation at a `Table`/`Return` list boundary, and both the 581/582 warnings.
+  - Eval: whole-project `deno test` (41 tests/154 steps), `deno lint`, `deno fmt --check`,
+    `deno check` all clean. Independently re-ran all four myself; `git status --short` matched
+    the subagent's report exactly (only `check_state.ts` and the new `src/stages/` files
+    touched, plus this session's own `PLAN.md` edit).
+  - Note: dispatched to a `build` subagent. It caught and fixed a real bug in its own first
+    draft: the 581 check must re-read `node[2]` *after* the recursive `handle_nodes(chstate,
+    node)` call, not reuse the value captured before it, because that recursive call can
+    itself unwrap a `Paren` sitting at `node[2]` first (e.g. `not (a == b)`) — using the
+    stale pre-recursion value would make the 581 check miss this case. The subagent caught
+    this by ground-truthing against the real Lua 5.4 interpreter running the actual vendored
+    source, not from inspection alone. Independently re-verified this fix and two other
+    flagged claims (the tail-Paren preservation condition's exact boolean logic; the
+    `Local`-vs-`Set` unwrap distinction) by running the real vendored `unwrap_parens.lua`
+    under `/usr/bin/lua` (5.4.8) against six source snippets and diffing AST dumps
+    before/after `unwrap_parens.run`, including `local x = not (a == b)` (the exact case the
+    fix targets) — all six matched the ported behavior exactly.
+- [ ] Ticket 4.2: Port `linearize.lua` (747 lines) solo. Implemented directly, not dispatched.
+      Ported `linearize_spec.lua` (406 lines) as the correctness oracle.
+- [ ] Ticket 4.3: Port `parse_inline_options.lua` (351 lines) + `name_functions.lua` (71 lines)
+      + `resolve_locals.lua` (273 lines). `parse_inline_options` and `name_functions` have no
+      upstream spec — hand-written tests. `resolve_locals_spec.lua` (159 lines) ported for
+      `resolve_locals.lua`.
+- [ ] Ticket 4.4: Port `detect_unused_locals.lua` (335 lines) solo, largest single detect_*
+      stage. Ported `unused_locals_spec.lua` (394 lines).
+- [ ] Ticket 4.5: Port `detect_globals.lua` (252 lines) + `detect_uninit_accesses.lua`
+      (54 lines). Ported `globals_spec.lua` (143 lines) + `uninit_accesses_spec.lua`
+      (125 lines).
+- [ ] Ticket 4.6: Port `detect_cyclomatic_complexity.lua` (159 lines) +
+      `detect_unreachable_code.lua` (36 lines). Ported `cyclomatic_complexity_spec.lua`
+      (236 lines) + `unreachable_code_spec.lua` (126 lines).
+- [ ] Ticket 4.7: Port the 7 smallest detect_* stages together: `detect_bad_whitespace`
+      (76 lines), `detect_unused_fields` (81 lines), `detect_reversed_fornum_loops`
+      (39 lines), `detect_empty_blocks` (36 lines), `detect_unbalanced_assignments`
+      (34 lines), `detect_compound_operators` (34 lines), `detect_empty_statements`
+      (13 lines). `detect_compound_operators` and `detect_empty_statements` have no upstream
+      spec — hand-written tests; the other 5 get their existing busted specs ported
+      (`bad_whitespace_spec.lua` 74 lines, `unused_fields_spec.lua` 46 lines,
+      `reversed_fornum_loops_spec.lua` 87 lines, `empty_blocks_spec.lua` 68 lines,
+      `unbalanced_assignments_spec.lua` 56 lines).
+- [ ] Ticket 4.8: Port `stages/init.lua` (76 lines), the stage registry + warning-metadata
+      table. Solo, final ticket of the phase — requires all 18 stage modules to exist first.
 
 ## Phase 5 — check.lua + filter.lua + init.lua (compose + public API)
 
