@@ -397,9 +397,57 @@ Phase 3 baseline).
     translation (the trickiest part of this file, given the Lua source's metatable/`rawget`
     indirection) against both the implementation report's description and the actual code -
     matches the original's semantics exactly.
-- [ ] Ticket 4.5: Port `detect_globals.lua` (252 lines) + `detect_uninit_accesses.lua`
-      (54 lines). Ported `globals_spec.lua` (143 lines) + `uninit_accesses_spec.lua`
-      (125 lines).
+- [x] Ticket 4.5: Port `detect_globals.lua` (252 lines) to TS (`src/stages/detect_globals.ts`,
+      341 lines) + `detect_uninit_accesses.lua` (54 lines) to TS
+      (`src/stages/detect_uninit_accesses.ts`, 85 lines). Ported `globals_spec.lua` (143 lines)
+      as `src/stages/detect_globals_test.ts` (222 lines) + `uninit_accesses_spec.lua` (125 lines)
+      as `src/stages/detect_uninit_accesses_test.ts` (166 lines), following the established
+      one-`Deno.test`-per-`describe`, one-`t.step`-per-`it` convention (the upstream
+      `uninit_accesses_spec.lua` `describe` block name, "uninitalized access detection", carries
+      its own spelling variant of "uninitialized" from the Lua source; kept verbatim rather than
+      corrected, since - unlike ticket 4.4's unambiguous "recurisve" typo - this one reads as a
+      debatable judgment call, not a clear-cut error).
+      `node.resolution` (an alias-tracking memo `deep_resolve` stashes on AST nodes to trace
+      `local alias = global.field`-style chains back to a global) ported as a single
+      `"unknown" | "not_string" | AstNode` union - the "resolved to an indexing chain" case reuses
+      a synthetic `AstNode`-shaped object (global node at array-part index 1, key resolutions
+      following) rather than a bespoke type, since `resolved_to_index`'s own check already treats
+      any non-`String`-tag `AstNode` as an indexing chain. `previous_indexing_len` kept snake_case
+      on this internal resolution structure (not just the final `Warning`), since it is the exact
+      same field flowing unchanged from the internal chain into the public warning object.
+      `detect_globals.lua`'s `detect_in_node` walks a base/key node chain via a `repeat...until`
+      loop that reassigns its own `node` parameter in place; `warn_global` at the end of the
+      function reads that same reassigned `node`, not the original - confirmed directly against
+      the Lua source (plain parameter reassignment, no shadowing) and cross-checked against the
+      "detects indirect global field access" test case's column range (8-12, matching the `alias`
+      identifier the loop walks down to, not the full `alias[2][c]` expression). One call site in
+      that same loop (`detect_in_node(chstate, item, node[2], ...)`) needed an explicit
+      `typeof === "object"` guard with no Lua-side equivalent: for an `Invoke` node, Lua's `node[2]`
+      is a bare method-name string, and calling `detect_in_node` on it is a harmless no-op only
+      because Lua strings have a metatable making `.tag`/`ipairs()` silently do nothing on them -
+      TypeScript has no such fallback, so the guard reproduces the Lua no-op explicitly rather than
+      passing a raw string where an `AstNode` is expected. Both files' `warnings` metadata exports
+      follow ticket 4.4's precedent: `detect_uninit_accesses.ts` uses the plain-string
+      `message_format` shape every other stage's warnings table uses, but `detect_globals.ts`
+      needs the wider `message_format: string | ((warning: Warning) => string)` type, since three
+      of its warning codes (122, 142, 143) format via closures (`prefix_if_indirect`), not strings.
+  - Eval: whole-project `deno test` (60 tests/228 steps, up from 58/212), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file set
+    exactly - four new `src/stages/` files, no other files touched (unlike ticket 4.4, this
+    ticket's stages needed no upstream file changes). All 16 test-file steps (8 + 8) passed in
+    full on the implementation dispatch's first attempt, no test-file bugs found; one formatting
+    nit in the test-writing dispatch's output (an unwrapped object literal) was caught and fixed
+    with `deno fmt` during independent re-verification.
+  - Note: dispatched as two separate `build` subagent calls (test-writing, then implementation
+    against those tests, covering both stage files together per this ticket's own file grouping),
+    per this phase's split-dispatch convention. The first implementation-dispatch attempt returned
+    an empty result with the placeholder files untouched (a failed/aborted subagent run, not a
+    reported failure) and was retried verbatim; the retry succeeded on its first real attempt.
+    Independently re-ran the full test/lint/fmt/check suite and `git status` after the
+    implementation dispatch, and spot-checked the `warn_global`-reads-the-reassigned-`node` claim
+    (the trickiest part of this file, given the Lua source's in-place parameter reassignment)
+    directly against the vendored Lua source and the passing test's own column expectations -
+    matches the original's semantics exactly.
 - [ ] Ticket 4.6: Port `detect_cyclomatic_complexity.lua` (159 lines) +
       `detect_unreachable_code.lua` (36 lines). Ported `cyclomatic_complexity_spec.lua`
       (236 lines) + `unreachable_code_spec.lua` (126 lines).
