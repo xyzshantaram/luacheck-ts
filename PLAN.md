@@ -108,10 +108,37 @@ known and used to scope Phases 2+ below.
     --check`, `deno task build` all clean.
   - Note: continued implementing directly rather than re-attempting `coder` dispatch, per the
     same tooling issue noted in ticket 2.1.
-- [ ] Ticket 2.3: Port `parser.lua` to TS (`src/parser.ts`). Lua 5.4 recursive-descent parser
+- [x] Ticket 2.3: Port `parser.lua` to TS (`src/parser.ts`). Lua 5.4 recursive-descent parser
       → AST with range info, `SyntaxError` class, including `<const>`/`<close>` attributes,
-      bitwise operators, floor division `//`, `goto`/labels as AST data.
-  - Eval: ported `parser_spec.lua` (1540 lines) passes under `deno test`.
+      bitwise operators, floor division `//`, `goto`/labels as AST data. `goto`/`::label::`
+      ported as plain `Goto`/`Label` AST node data only, no JS control-flow emulation, per the
+      port-notes finding that luacheck's own source never executes `goto` as a statement.
+      `SyntaxError` built with `utils.class()`, matching the existing class pattern, not a
+      bare `class extends Error`. AST array-parts ported as objects with string-numeral keys
+      (`node["1"]`, `node["2"]`, ...) instead of real JS arrays, to keep 1-based indexing
+      throughout without an error-prone shift; small helpers (`astPush`/`astLen`/`astLast`/
+      `astInsertAt`) stand in for Lua's `t[#t+1]=x`/`#t` idiom. `parser.parse` actually returns
+      7 values in the real source (`ast, comments, code_lines, line_endings,
+      hanging_semicolons, lexer.line_offsets, lexer.line_lengths`), not the 5 this ticket
+      originally assumed — returned as a named `ParseResult` interface rather than forcing
+      `lexer.ts`'s positional-tuple precedent, since the values are heterogeneous and this
+      runs once per parse rather than in `nextToken`'s hot loop. Reuses `utils.ts`'s `Stack`
+      (for the unpaired-token guesser) rather than a local duplicate.
+  - Eval: ported `parser_spec.lua` (1540 Lua lines → 2503 TS test lines) passes under
+    `deno test` — 1 test/61 steps green on its own; whole-project `deno test` (15 tests/119
+    steps), `deno lint`, `deno fmt --check`, `deno check` all clean. A real bug was caught by
+    the test suite (not by inspection): `atom()` unconditionally assigned
+    `astNode["1"] = state.tokenValue` for `Number`/`String`/`Nil`/`True`/`False`/`Dots` nodes;
+    for keyword tokens (`true`/`false`/`nil`) `tokenValue` is `undefined`, and Lua's
+    assign-`nil`-is-a-no-op table semantics differ from JS, where `obj[k] = undefined` still
+    creates an own property. Fixed with the same `!== undefined` guard already used in the
+    `arr()` helper. Nothing was skipped; the full grammar and full spec were ported.
+  - Note: dispatched to a `build` subagent (not `coder`, which had 3 consecutive empty runs in
+    tickets 2.1/2.2) with a detailed brief covering project conventions, style rules, and
+    required verification steps. It completed in one pass. Independently re-verified in the
+    primary session before treating the ticket as done: reran `deno test`/`lint`/`fmt --check`/
+    `check` myself, confirmed line counts and `git status` matched the subagent's report
+    exactly, and spot-checked the `SyntaxError`/`Stack`/`atom()` claims directly in the source.
 
 Lua pattern matching (`string.find/match/gsub/format`) is used throughout this phase's files
 and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-compatible helper
@@ -179,7 +206,7 @@ tracked only.
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 1 / 2 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found |
+| Verification catch rate | 1 / 3 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found. Ticket 2.3: independently reran `deno test`/`lint`/`fmt --check`/`check` and spot-checked the `build` subagent's report claims against the actual source after it reported done, all claims matched, no discrepancy found |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |
