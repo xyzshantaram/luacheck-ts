@@ -25,6 +25,12 @@ source, then hand type-annotation/cleanup, preserving upstream analysis behavior
   matching; lua_to_js parses but its codegen crashes on metatable classes, varargs, and
   multiple returns, the exact constructs the pipeline is built on. No transpiler is used. Each
   file is ported by hand, then verified against its ported busted spec.
+- **Library use:** prefer well-maintained JSR (`jsr:@std/...`) or npm packages over hand-rolled
+  utilities where there is a clear net win (nontrivial logic, meaningfully reduces bug surface),
+  added via `deno add`. Do not add a dependency for a trivial one-liner, and weigh bundle size
+  against convenience (browser target). Checked and confirmed no suitable Lua-pattern-matching
+  library exists on npm or JSR (only full Lua VMs, too heavy) — that piece is hand-written
+  (`src/lua_pattern.ts`), a from-scratch port of Lua 5.4's pattern-matching algorithm.
 - **Source version:** luacheck 1.2.0 (latest tagged release), pinned as the porting reference
   and diff target.
 - **Tests:** port luacheck's own busted specs, translated to run under Deno's test runner, as
@@ -66,12 +72,22 @@ known and used to scope Phases 2+ below.
 
 **Status:** in_progress
 
-- [ ] Ticket 2.1: Port `utils.lua`, `unicode_printability_boundaries.lua`, `unicode.lua` to TS
-      (`src/utils.ts`, `src/unicode.ts`). Covers: `class()` helper → JS class/prototype
-      mapping, `Stack`, `try`/pack (multi-return emulation), array/set helpers,
-      string split/strip, `is_printable`.
-  - Eval: ported `utils_spec.lua` (224 lines) passes under `deno test`. No dedicated upstream
-    spec for `unicode.lua`; its correctness is exercised indirectly via decoder tests in 2.2.
+- [x] Ticket 2.1: Port `utils.lua`, `unicode_printability_boundaries.lua`, `unicode.lua` to TS
+      (`src/utils.ts`, `src/unicode.ts`) plus a new `src/lua_pattern.ts` (hand-written Lua
+      pattern matcher, needed by `after`/`strip`/`split` and every later file that uses Lua
+      patterns). `read_file`/`load`/`load_config` dropped (CLI-only, out of scope); their
+      spec cases removed from the ported test file. `unprefix`, `pmatch`,
+      `InvalidPatternError`, and the `has_type*`/`array_of` validators deferred to ticket 3.3
+      (options.lua), the first file that needs them.
+  - Eval: ported `utils_spec.lua` (224 lines, minus the dropped I/O cases) passes under
+    `deno test` — 12 tests/17 steps green. No dedicated upstream spec for `unicode.lua`;
+    `isPrintable` verified directly against a real Lua 5.4 interpreter (`lua -e`) across the
+    boundary codepoints instead, exact match, and will also be exercised indirectly via
+    decoder tests in 2.2. Whole-project `deno test`/`deno lint`/`deno fmt --check` clean.
+  - Note: the `coder` subagent returned empty (no files, no report) on three consecutive
+    dispatch attempts for this ticket's implementation half; test-writing dispatch had
+    worked fine earlier. Implemented directly in the primary session instead of continuing
+    to retry.
 - [ ] Ticket 2.2: Port `lexer.lua`, `decoder.lua` to TS (`src/lexer.ts`, `src/decoder.ts`).
       Covers: Lua 5.4 tokenizer (number forms incl. integer/float distinction, string
       escapes, comments), UTF-8/latin1 source decode into `Chars` objects.
@@ -148,7 +164,7 @@ tracked only.
 
 | Metric | Count / Value | Notes |
 |---|---|---|
-| Verification catch rate | 1 / 1 | Phase 0 review caught unscoped JSR name + esbuild-instead-of-deno-bundle before marking done |
+| Verification catch rate | 1 / 2 | Phase 0: caught unscoped JSR name + esbuild-instead-of-deno-bundle. Ticket 2.1: cross-checked `isPrintable` against a real Lua 5.4 interpreter, no discrepancy found |
 | Escaped defect rate | 0 / 0 | bugs/regressions found after a ticket was marked done, vs. tickets closed |
 | Rework/reopen rate | 0 / 0 | tickets reopened/rescoped after grilling had already settled them, vs. tickets grilled |
 | Rough cost | — | approximate turns/tokens spent on grilling + planning + dispatch + review per ticket, vs. a rough estimate of direct-implementation cost |

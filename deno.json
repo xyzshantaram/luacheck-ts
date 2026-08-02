@@ -13,12 +13,16 @@
     "strict": true,
     "lib": [
       "ES2020",
-      "DOM"
+      "DOM",
+      "deno.ns"
     ]
   },
   "fmt": {
     "exclude": [
       "**/*.md"
     ]
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.19"
   }
 }
