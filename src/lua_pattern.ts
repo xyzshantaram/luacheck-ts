@@ -287,10 +287,8 @@ function endCapture(ms: MatchState, s: number, p: number): number | null {
   return res;
 }
 
-function getCaptures(ms: MatchState, s: number, e: number): Array<string> {
-  if (ms.captures.length === 0) {
-    return [ms.src.slice(s, e)];
-  }
+/** Raw captures for a match; empty if the pattern had no explicit `(...)` groups. */
+function getCaptures(ms: MatchState): string[] {
   return ms.captures.map((cap) => ms.src.slice(cap.start, cap.start + cap.len));
 }
 
@@ -299,7 +297,7 @@ export interface LuaFindResult {
   start: number;
   /** 0-based, exclusive. */
   end: number;
-  /** The whole match if the pattern has no captures, else one entry per capture. */
+  /** Raw captures; empty if the pattern had no explicit `(...)` groups (matches `string.find`'s behavior of not returning extra values in that case). */
   captures: string[];
 }
 
@@ -322,7 +320,7 @@ export function luaFind(
     const ms = new MatchState(s, pat);
     const e = doMatch(ms, start, 0);
     if (e !== null) {
-      return { start, end: e, captures: getCaptures(ms, start, e) };
+      return { start, end: e, captures: getCaptures(ms) };
     }
     start++;
   } while (!anchored && start <= s.length);
@@ -350,8 +348,13 @@ export function* luaGmatch(
       continue;
     }
 
-    const captures = getCaptures(ms, pos, e);
-    yield captures.length === 1 ? captures[0] : captures;
+    const raw = getCaptures(ms);
+    const result: string | string[] = raw.length === 0
+      ? s.slice(pos, e)
+      : raw.length === 1
+      ? raw[0]
+      : raw;
+    yield result;
     pos = e > pos ? e : pos + 1;
   }
 }

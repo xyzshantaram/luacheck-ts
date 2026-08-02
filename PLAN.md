@@ -88,11 +88,26 @@ known and used to scope Phases 2+ below.
     dispatch attempts for this ticket's implementation half; test-writing dispatch had
     worked fine earlier. Implemented directly in the primary session instead of continuing
     to retry.
-- [ ] Ticket 2.2: Port `lexer.lua`, `decoder.lua` to TS (`src/lexer.ts`, `src/decoder.ts`).
-      Covers: Lua 5.4 tokenizer (number forms incl. integer/float distinction, string
-      escapes, comments), UTF-8/latin1 source decode into `Chars` objects.
-  - Eval: ported `lexer_spec.lua` (450 lines) and `decoder_spec.lua` (92 lines) pass under
-    `deno test`.
+- [x] Ticket 2.2: Port `lexer.lua`, `decoder.lua` to TS (`src/lexer.ts`, `src/decoder.ts`).
+      Kept 1-based Lua indexing throughout (`Chars`, `LexerState` offsets) rather than
+      re-deriving 0-based equivalents, per the port-strategy decision. `decoder.ts`'s raw-byte
+      `find` reuses `lua_pattern.ts` directly by treating source bytes as a JS "binary string"
+      (one UTF-16 code unit per byte) instead of writing a second byte-array pattern matcher.
+      Refactored `lua_pattern.ts`'s capture handling so `LuaFindResult.captures` is empty when
+      the pattern has no explicit `(...)` groups (needed for `decoder.find`'s Lua-`string.find`-
+      accurate return arity); re-verified `utils_test.ts` still green after that change. Added
+      `src/testdata/argparse-0.2.0.lua` (real-world fixture from luacheck's own spec/samples,
+      973 lines) for the lexer's stress-test case.
+  - Eval: ported `lexer_spec.lua` (450 lines, 38 steps) and `decoder_spec.lua` (92 lines,
+    2 steps incl. the argparse fixture) pass under `deno test`. `isPrintable` cross-checked
+    directly against real Lua 5.4 earlier; `decoder_test.ts`'s UTF-8 fixtures are built with
+    the platform's own `TextEncoder` as an independent oracle, not decoder.ts's own algorithm
+    (surrogate-range codepoints skipped — Lua round-trips them, `TextEncoder` replaces them
+    with U+FFFD, an artifact of JS's stricter string model unrelated to decoder.ts's
+    correctness). Whole-project `deno test` (14 tests/58 steps), `deno lint`, `deno fmt
+    --check`, `deno task build` all clean.
+  - Note: continued implementing directly rather than re-attempting `coder` dispatch, per the
+    same tooling issue noted in ticket 2.1.
 - [ ] Ticket 2.3: Port `parser.lua` to TS (`src/parser.ts`). Lua 5.4 recursive-descent parser
       → AST with range info, `SyntaxError` class, including `<const>`/`<close>` attributes,
       bitwise operators, floor division `//`, `goto`/labels as AST data.
