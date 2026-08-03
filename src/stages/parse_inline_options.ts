@@ -26,7 +26,7 @@ import {
   type Options,
   variadicInlineOptions,
 } from "../options.ts";
-import { after, arrayToSet, split, Stack, strip } from "../utils.ts";
+import { after, split, Stack, strip } from "../utils.ts";
 import { luaFind } from "../lua_pattern.ts";
 
 export const warnings: Record<
@@ -48,7 +48,7 @@ export const inlineOptionFields = [
   "end_column",
 ];
 
-const limitOpts = arrayToSet([
+const limitOpts = new Set([
   "max_line_length",
   "max_code_line_length",
   "max_string_line_length",
@@ -63,7 +63,7 @@ function isValidOptionName(name: string): boolean {
 
   const stripped = name.replace(/^no_/, "");
   return nullaryInlineOptions[stripped] !== undefined ||
-    limitOpts[stripped] !== undefined;
+    limitOpts.has(stripped);
 }
 
 /**
@@ -392,8 +392,8 @@ function applyBoundaries(
   // boundaries that were not popped yet plus the number of options that
   // would be on the option stack after applying all already processed
   // option table pushes and pops.
-  const pushes = Stack();
-  const pushOptionCounts = Stack();
+  const pushes = new Stack();
+  const pushOptionCounts = new Stack();
   let optionCount = 0;
 
   for (const item of inlineOptionsAndBoundaries) {

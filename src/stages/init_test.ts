@@ -10,7 +10,7 @@
  * directly, plus every code from every stage module's own `warnings`
  * export. Each merged entry gets `fields` set to the four base fields
  * (`code`, `line`, `column`, `end_column`) concatenated with the stage's
- * own extra fields, and `fields_set` set to `arrayToSet` of that same
+ * own extra fields, and `fields_set` set to a `Set` built from that same
  * list, per `register_warnings` in the Lua source.
  *
  * `run` from ./init.ts does not exist yet (a later implementation dispatch
@@ -22,7 +22,6 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { checkStateNew } from "../check_state.ts";
 import { sortByLocation } from "../core_utils.ts";
-import { arrayToSet } from "../utils.ts";
 import { stages } from "./init.ts";
 
 import * as parseModule from "./parse.ts";
@@ -87,7 +86,7 @@ Deno.test("stage registry", async (t) => {
           "prev_column",
           "prev_end_column",
         ],
-        fields_set: arrayToSet([
+        fields_set: new Set([
           ...BASE_FIELDS,
           "msg",
           "prev_line",
@@ -99,7 +98,7 @@ Deno.test("stage registry", async (t) => {
       assertEquals(stages.warnings["631"], {
         message_format: "line is too long ({end_column} > {max_length})",
         fields: [...BASE_FIELDS, "max_length", "line_ending"],
-        fields_set: arrayToSet([...BASE_FIELDS, "max_length", "line_ending"]),
+        fields_set: new Set([...BASE_FIELDS, "max_length", "line_ending"]),
       });
     },
   );
@@ -110,7 +109,7 @@ Deno.test("stage registry", async (t) => {
       assertEquals(stages.warnings["611"], {
         message_format: "line contains only whitespace",
         fields: BASE_FIELDS,
-        fields_set: arrayToSet(BASE_FIELDS),
+        fields_set: new Set(BASE_FIELDS),
       });
     },
   );
@@ -122,7 +121,7 @@ Deno.test("stage registry", async (t) => {
         message_format:
           "numeric for loop goes from #(expr) down to {limit} but loop step is not negative",
         fields: [...BASE_FIELDS, "limit"],
-        fields_set: arrayToSet([...BASE_FIELDS, "limit"]),
+        fields_set: new Set([...BASE_FIELDS, "limit"]),
       });
     },
   );
@@ -141,7 +140,7 @@ Deno.test("stage registry", async (t) => {
       ]);
       assertEquals(
         entry.fields_set,
-        arrayToSet([
+        new Set([
           ...BASE_FIELDS,
           "complexity",
           "function_type",

@@ -17,7 +17,7 @@
 import * as lexer from "./lexer.ts";
 import type { LexerState } from "./lexer.ts";
 import type { Chars } from "./decoder.ts";
-import { arrayToSet, class as classImpl, Stack } from "./utils.ts";
+import { Stack } from "./utils.ts";
 
 export interface Range {
   line: number;
@@ -73,31 +73,32 @@ export interface SyntaxErrorInstance {
   [key: string]: unknown;
 }
 
-export const SyntaxError = classImpl<SyntaxErrorInstance>();
+export class SyntaxError implements SyntaxErrorInstance {
+  msg: string;
+  line: number;
+  offset: number;
+  endOffset: number;
+  declare prevLine?: number;
+  declare prevOffset?: number;
+  declare prevEndOffset?: number;
+  [key: string]: unknown;
 
-SyntaxError.__init = function (
-  obj: Record<string, unknown>,
-  msg: unknown,
-  range: unknown,
-  prevRange?: unknown,
-) {
-  const self = obj as SyntaxErrorInstance;
-  const r = range as Range;
-  self.msg = msg as string;
-  self.line = r.line;
-  self.offset = r.offset;
-  self.endOffset = r.endOffset;
+  constructor(msg: string, range: Range, prevRange?: Range) {
+    this.msg = msg;
+    this.line = range.line;
+    this.offset = range.offset;
+    this.endOffset = range.endOffset;
 
-  if (prevRange) {
-    const pr = prevRange as Range;
-    self.prevLine = pr.line;
-    self.prevOffset = pr.offset;
-    self.prevEndOffset = pr.endOffset;
+    if (prevRange) {
+      this.prevLine = prevRange.line;
+      this.prevOffset = prevRange.offset;
+      this.prevEndOffset = prevRange.endOffset;
+    }
   }
-};
+}
 
 function syntaxError(msg: string, range: Range, prevRange?: Range): never {
-  throw SyntaxError(msg, range, prevRange);
+  throw new SyntaxError(msg, range, prevRange);
 }
 
 function markLineEndings(
@@ -234,7 +235,7 @@ interface OpeningTokenWrapper extends Range {
   errorRange?: Range;
 }
 
-type StackInstance = ReturnType<typeof Stack>;
+type StackInstance = InstanceType<typeof Stack>;
 
 export interface UnpairedTokenGuesserInstance {
   oldState: ParserState;
@@ -253,108 +254,112 @@ export interface UnpairedTokenGuesserInstance {
   [key: string]: unknown;
 }
 
-const UnpairedTokenGuesser = classImpl<UnpairedTokenGuesserInstance>();
+class UnpairedTokenGuesser implements UnpairedTokenGuesserInstance {
+  oldState: ParserState;
+  errorOffset: number;
+  errorOpeningRange: Range;
+  errorClosingToken: string;
+  openingTokensStack: StackInstance;
+  declare state: ParserState;
+  declare guessed?: OpeningTokenWrapper;
+  [key: string]: unknown;
 
-UnpairedTokenGuesser.__init = function (
-  obj: Record<string, unknown>,
-  state: unknown,
-  errorOpeningRange: unknown,
-  errorClosingToken: unknown,
-) {
-  const self = obj as UnpairedTokenGuesserInstance;
-  self.oldState = state as ParserState;
-  self.errorOffset = (state as ParserState).offset;
-  self.errorOpeningRange = errorOpeningRange as Range;
-  self.errorClosingToken = errorClosingToken as string;
-  self.openingTokensStack = Stack();
-};
+  constructor(
+    state: ParserState,
+    errorOpeningRange: Range,
+    errorClosingToken: string,
+  ) {
+    this.oldState = state;
+    this.errorOffset = state.offset;
+    this.errorOpeningRange = errorOpeningRange;
+    this.errorClosingToken = errorClosingToken;
+    this.openingTokensStack = new Stack();
+  }
 
-UnpairedTokenGuesser.guess = function (this: UnpairedTokenGuesserInstance) {
-  this.state = newParserState(this.oldState.lexer.src);
-  this.state.unpairedTokenGuesser = this;
-  skipToken(this.state);
-  parseBlock(this.state);
-  throw "No syntax error in second parse";
-};
+  guess(): void {
+    this.state = newParserState(this.oldState.lexer.src);
+    this.state.unpairedTokenGuesser = this;
+    skipToken(this.state);
+    parseBlock(this.state);
+    throw "No syntax error in second parse";
+  }
 
-UnpairedTokenGuesser.onBlockStart = function (
-  this: UnpairedTokenGuesserInstance,
-  openingTokenRange: Range,
-  openingToken: string,
-) {
-  const tokenWrapper = copyRange(openingTokenRange) as OpeningTokenWrapper;
-  tokenWrapper.token = openingToken;
-  tokenWrapper.closingToken = openingTokenToClosing[openingToken];
-  tokenWrapper.eligible = tokenWrapper.closingToken === this.errorClosingToken;
-  tokenWrapper.indentation = getIndentation(this.state, openingTokenRange.line);
-  this.openingTokensStack.push(tokenWrapper);
-};
+  onBlockStart(
+    openingTokenRange: Range,
+    openingToken: string,
+  ): void {
+    const tokenWrapper = copyRange(openingTokenRange) as OpeningTokenWrapper;
+    tokenWrapper.token = openingToken;
+    tokenWrapper.closingToken = openingTokenToClosing[openingToken];
+    tokenWrapper.eligible =
+      tokenWrapper.closingToken === this.errorClosingToken;
+    tokenWrapper.indentation = getIndentation(
+      this.state,
+      openingTokenRange.line,
+    );
+    this.openingTokensStack.push(tokenWrapper);
+  }
 
-UnpairedTokenGuesser.setGuessed = function (
-  this: UnpairedTokenGuesserInstance,
-) {
-  if (this.guessed) return;
-  this.guessed = this.openingTokensStack.top as OpeningTokenWrapper;
-  this.guessed.errorToken = this.state.token;
-  this.guessed.errorRange = copyRange(this.state);
-};
+  setGuessed(): void {
+    if (this.guessed) return;
+    this.guessed = this.openingTokensStack.top as OpeningTokenWrapper;
+    this.guessed.errorToken = this.state.token;
+    this.guessed.errorRange = copyRange(this.state);
+  }
 
-UnpairedTokenGuesser.checkToken = function (
-  this: UnpairedTokenGuesserInstance,
-) {
-  const top = this.openingTokensStack.top as OpeningTokenWrapper | undefined;
+  checkToken(): void {
+    const top = this.openingTokensStack.top as OpeningTokenWrapper | undefined;
 
-  if (top && top.eligible && this.state.line > top.line) {
-    const tokenIndentation = getIndentation(this.state, this.state.line);
+    if (top && top.eligible && this.state.line > top.line) {
+      const tokenIndentation = getIndentation(this.state, this.state.line);
 
-    if (tokenIndentation < top.indentation) {
-      this.setGuessed();
-    } else if (tokenIndentation === top.indentation) {
-      const token = this.state.token;
-
-      if (
-        token !== top.closingToken &&
-        ((top.token !== "if" && top.token !== "elseif") ||
-          (token !== "elseif" && token !== "else"))
-      ) {
+      if (tokenIndentation < top.indentation) {
         this.setGuessed();
+      } else if (tokenIndentation === top.indentation) {
+        const token = this.state.token;
+
+        if (
+          token !== top.closingToken &&
+          ((top.token !== "if" && top.token !== "elseif") ||
+            (token !== "elseif" && token !== "else"))
+        ) {
+          this.setGuessed();
+        }
+      }
+    }
+
+    if (this.state.offset === this.errorOffset) {
+      if (
+        this.guessed && this.guessed.errorRange!.offset !== this.state.offset
+      ) {
+        this.state.line = this.guessed.errorRange!.line;
+        this.state.offset = this.guessed.errorRange!.offset;
+        this.state.endOffset = this.guessed.errorRange!.endOffset;
+        this.state.token = this.guessed.errorToken!;
+        missingClosingTokenError(
+          this.state,
+          this.guessed,
+          this.guessed.token,
+          this.guessed.closingToken,
+          true,
+        );
       }
     }
   }
 
-  if (this.state.offset === this.errorOffset) {
-    if (this.guessed && this.guessed.errorRange!.offset !== this.state.offset) {
-      this.state.line = this.guessed.errorRange!.line;
-      this.state.offset = this.guessed.errorRange!.offset;
-      this.state.endOffset = this.guessed.errorRange!.endOffset;
-      this.state.token = this.guessed.errorToken!;
-      missingClosingTokenError(
-        this.state,
-        this.guessed,
-        this.guessed.token,
-        this.guessed.closingToken,
-        true,
-      );
+  onBlockEnd(): void {
+    this.checkToken();
+    this.openingTokensStack.pop();
+
+    if (!this.openingTokensStack.top) {
+      this.guessed = undefined;
     }
   }
-};
 
-UnpairedTokenGuesser.onBlockEnd = function (
-  this: UnpairedTokenGuesserInstance,
-) {
-  this.checkToken();
-  this.openingTokensStack.pop();
-
-  if (!this.openingTokensStack.top) {
-    this.guessed = undefined;
+  onStatement(): void {
+    this.checkToken();
   }
-};
-
-UnpairedTokenGuesser.onStatement = function (
-  this: UnpairedTokenGuesserInstance,
-) {
-  this.checkToken();
-};
+}
 
 function missingClosingTokenError(
   state: ParserState,
@@ -405,7 +410,8 @@ function checkClosingToken(
 
   if (closingToken === "end" || closingToken === "until") {
     if (!state.unpairedTokenGuesser) {
-      UnpairedTokenGuesser(state, openingRange, closingToken).guess();
+      new UnpairedTokenGuesser(state, openingRange as Range, closingToken)
+        .guess();
     }
   }
 
@@ -1079,13 +1085,13 @@ statements["::"] = function (state) {
   return astNode;
 };
 
-const closingTokens = arrayToSet(["end", "eof", "else", "elseif", "until"]);
+const closingTokens = new Set(["end", "eof", "else", "elseif", "until"]);
 
 statements["return"] = function (state) {
   const startRange = copyRange(state);
   skipToken(state);
 
-  if (closingTokens[state.token] || state.token === ";") {
+  if (closingTokens.has(state.token) || state.token === ";") {
     return newOuterNode(startRange, "Return");
   }
 
@@ -1188,7 +1194,7 @@ function parseBlock(
 
   let afterStatement = false;
 
-  while (!closingTokens[state.token]) {
+  while (!closingTokens.has(state.token)) {
     const firstToken = state.token;
 
     if (firstToken === ";") {
@@ -1242,8 +1248,8 @@ function newParserState(
 }
 
 /**
- * Parses source characters. On error throws a `SyntaxError` instance (see
- * `isInstance` in utils.ts to detect it).
+ * Parses source characters. On error throws a `SyntaxError` instance
+ * (detect it with `instanceof SyntaxError`).
  */
 export function parse(
   src: Chars,

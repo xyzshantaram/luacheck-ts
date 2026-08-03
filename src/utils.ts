@@ -74,14 +74,6 @@ export function arrayOf(type_: string): (x: unknown) => [boolean, string?] {
   };
 }
 
-export function arrayToSet(array: string[]): Record<string, number> {
-  const set: Record<string, number> = {};
-  array.forEach((value, index) => {
-    set[value] = index + 1;
-  });
-  return set;
-}
-
 export function concatArrays<T>(arrays: T[][]): T[] {
   const res: T[] = [];
   for (const sub of arrays) {
@@ -103,36 +95,6 @@ export function update<
   return t1 as T & U;
 }
 
-/** The non-callable part of a `class()` result: its methods/fields. */
-export interface LuaClass extends Record<string, unknown> {
-  __init?: (obj: Record<string, unknown>, ...args: unknown[]) => unknown;
-}
-
-/** A `class()` result: a callable constructor carrying its own methods/fields. */
-type LuaConstructor<T extends Record<string, unknown>> =
-  & LuaClass
-  & ((...args: unknown[]) => T);
-
-function classImpl<
-  T extends Record<string, unknown> = Record<string, unknown>,
->(): LuaConstructor<T> {
-  const cl = function (...args: unknown[]) {
-    const obj = Object.create(cl) as T;
-    if (typeof (cl as LuaClass).__init === "function") {
-      const initReturn = (cl as LuaClass).__init!(obj, ...args);
-      if (initReturn !== undefined) return initReturn;
-    }
-    return obj;
-  } as LuaConstructor<T>;
-  return cl;
-}
-export { classImpl as class };
-
-function isInstance(object: unknown, cl: LuaClass): boolean {
-  return typeof object === "object" && object !== null &&
-    Object.getPrototypeOf(object) === cl;
-}
-
 interface LuaStackInstance extends Record<string, unknown> {
   size: number;
   top: unknown;
@@ -141,87 +103,24 @@ interface LuaStackInstance extends Record<string, unknown> {
   [index: number]: unknown;
 }
 
-export const Stack: LuaConstructor<LuaStackInstance> = classImpl<
-  LuaStackInstance
->();
-Stack.__init = function (obj: Record<string, unknown>) {
-  (obj as LuaStackInstance).size = 0;
-};
-Stack.push = function (this: LuaStackInstance, value: unknown) {
-  this.size += 1;
-  this[this.size] = value;
-  this.top = value;
-};
-Stack.pop = function (this: LuaStackInstance) {
-  const value = this[this.size];
-  delete this[this.size];
-  this.size -= 1;
-  this.top = this[this.size];
-  return value;
-};
+export class Stack implements LuaStackInstance {
+  size = 0;
+  declare top: unknown;
+  [key: string]: unknown;
+  [index: number]: unknown;
 
-interface ErrorWrapperInstance {
-  err: unknown;
-  traceback: string;
-}
-
-class ErrorWrapperImpl implements ErrorWrapperInstance {
-  err: unknown;
-  traceback: string;
-
-  constructor(err: unknown, traceback: string) {
-    this.err = err;
-    this.traceback = traceback;
+  push(value: unknown): void {
+    this.size += 1;
+    this[this.size] = value;
+    this.top = value;
   }
 
-  toString(): string {
-    return `${String(this.err)}\n${this.traceback}`;
-  }
-}
-
-function errorHandler(err: unknown): ErrorWrapperInstance {
-  if (err instanceof ErrorWrapperImpl) return err;
-  // `debug.traceback()` has no JS equivalent; a captured stack is the
-  // closest available substitute and is only surfaced as an opaque string.
-  const traceback = err instanceof Error && err.stack
-    ? err.stack
-    : new Error().stack ?? "";
-  return new ErrorWrapperImpl(err, traceback);
-}
-
-/**
- * Like pcall, but wraps errors in an `{err, traceback}` object unless
- * already wrapped. A Lua function returning several values maps here to a
- * TS function returning an array of them; a single non-array return value
- * is passed through as-is.
- */
-function tryImpl(
-  // deno-lint-ignore no-explicit-any
-  f: (...args: any[]) => unknown,
-  ...args: unknown[]
-): [true, ...unknown[]] | [false, ErrorWrapperInstance] {
-  try {
-    const result = f(...args);
-    if (Array.isArray(result)) return [true, ...result];
-    if (result === undefined) return [true];
-    return [true, result];
-  } catch (err) {
-    return [false, errorHandler(err)];
-  }
-}
-export { tryImpl as try };
-
-export function* ripairs<T>(array: readonly T[]): Generator<[number, T]> {
-  for (let i = array.length; i >= 1; i--) {
-    yield [i, array[i - 1]];
-  }
-}
-
-export function* sortedPairs<T extends Record<string, unknown>>(
-  t: T,
-): Generator<[string, T[keyof T]]> {
-  for (const key of Object.keys(t).sort()) {
-    yield [key, t[key] as T[keyof T]];
+  pop(): unknown {
+    const value = this[this.size];
+    delete this[this.size];
+    this.size -= 1;
+    this.top = this[this.size];
+    return value;
   }
 }
 
@@ -254,11 +153,6 @@ export function split(str: string, sep?: string): string[] {
   return parts;
 }
 
-/** Maps `func` over `array`. */
-export function map<T, R>(func: (item: T) => R, array: readonly T[]): R[] {
-  return array.map(func);
-}
-
 /**
  * Behaves like `string.match`, returning whether `pattern` matches
  * anywhere in `str`. Throws on a malformed pattern, same as Lua's
@@ -267,7 +161,3 @@ export function map<T, R>(func: (item: T) => R, array: readonly T[]): R[] {
 export function pmatch(str: string, pattern: string): boolean {
   return luaFind(str, pattern) !== undefined;
 }
-
-// Exported for later tickets (options.lua's use of class-based error
-// objects and instance checks); not exercised by utils_spec.lua directly.
-export { isInstance };

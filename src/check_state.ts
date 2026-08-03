@@ -18,7 +18,6 @@ import type { AstNode, CommentEntry, Range } from "./parser.ts";
 import type { Chars } from "./decoder.ts";
 import type { LineInstance } from "./stages/linearize.ts";
 import type { Options } from "./options.ts";
-import { class as classImpl } from "./utils.ts";
 
 import type {
   NamedWarning,
@@ -110,120 +109,124 @@ export interface CheckStateInstance {
   [key: string]: unknown;
 }
 
-const CheckState = classImpl<CheckStateInstance>();
+export class CheckState implements CheckStateInstance {
+  sourceBytes: string;
+  warnings: Warning[];
 
-CheckState.__init = function (
-  obj: Record<string, unknown>,
-  sourceBytes: unknown,
-) {
-  const self = obj as CheckStateInstance;
-  self.sourceBytes = sourceBytes as string;
-  self.warnings = [];
-};
+  declare lineOffsets: number[];
+  declare lineLengths: number[];
+  declare source: Chars;
+  declare ast: AstNode;
+  declare comments: CommentEntry[];
+  declare codeLines: Record<number, boolean>;
+  declare lineEndings: Record<number, "comment" | "string">;
+  declare hangingSemicolons: Range[];
+  declare topLine: LineInstance;
+  declare lines: LineInstance[];
+  declare inlineOptions?: InlineOptionsEntry[];
 
-// Returns column of a character in a line given its offset.
-// The column is never larger than the line length.
-// This can be called if line length is not yet known.
-CheckState.offsetToColumn = function (
-  this: CheckStateInstance,
-  line: number,
-  offset: number,
-): number {
-  const lineLength = this.lineLengths[line];
-  const column = offset - this.lineOffsets[line] + 1;
+  [key: string]: unknown;
 
-  if (!lineLength) {
-    return column;
+  constructor(sourceBytes: string) {
+    this.sourceBytes = sourceBytes;
+    this.warnings = [];
   }
 
-  return Math.max(1, Math.min(lineLength, column));
-};
+  // Returns column of a character in a line given its offset.
+  // The column is never larger than the line length.
+  // This can be called if line length is not yet known.
+  offsetToColumn(line: number, offset: number): number {
+    const lineLength = this.lineLengths[line];
+    const column = offset - this.lineOffsets[line] + 1;
 
-CheckState.warnColumnRange = function <C extends Warning["code"]>(
-  this: CheckStateInstance,
-  code: C,
-  range: WarnColumnRangeInput,
-  warning?: Partial<
-    Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
-  >,
-): WarningByCode[C] {
-  const w = (warning ?? {}) as Record<string, unknown>;
-  w.code = code;
-  w.line = range.line;
-  w.column = range.column;
-  w.end_column = range.end_column;
-  this.warnings.push(w as unknown as WarningByCode[C]);
-  return w as unknown as WarningByCode[C];
-};
+    if (!lineLength) {
+      return column;
+    }
 
-CheckState.warn = function <C extends Warning["code"]>(
-  this: CheckStateInstance,
-  code: C,
-  line: number,
-  offset: number,
-  endOffset: number,
-  warning?: Partial<
-    Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
-  >,
-): WarningByCode[C] {
-  const w = (warning ?? {}) as Record<string, unknown>;
-  w.code = code;
-  w.line = line;
-  w.column = this.offsetToColumn(line, offset);
-  w.end_column = this.offsetToColumn(line, endOffset);
-  this.warnings.push(w as unknown as WarningByCode[C]);
-  return w as unknown as WarningByCode[C];
-};
+    return Math.max(1, Math.min(lineLength, column));
+  }
 
-CheckState.warnRange = function <C extends Warning["code"]>(
-  this: CheckStateInstance,
-  code: C,
-  range: Range,
-  warning?: Partial<
-    Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
-  >,
-): WarningByCode[C] {
-  return this.warn(code, range.line, range.offset, range.endOffset, warning);
-};
-
-CheckState.warnVar = function <C extends NamedWarning["code"]>(
-  this: CheckStateInstance,
-  code: C,
-  variable: { node: Range; name: string },
-  warning?: Partial<
-    Omit<NamedWarningByCode[C], "code" | "line" | "column" | "end_column">
-  >,
-): NamedWarningByCode[C] {
-  const w = this.warnRange(
-    code,
-    variable.node,
-    warning as Partial<
+  warnColumnRange<C extends Warning["code"]>(
+    code: C,
+    range: WarnColumnRangeInput,
+    warning?: Partial<
       Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
     >,
-  ) as NamedWarningByCode[C];
-  w.name = variable.name;
-  return w;
-};
+  ): WarningByCode[C] {
+    const w = (warning ?? {}) as Record<string, unknown>;
+    w.code = code;
+    w.line = range.line;
+    w.column = range.column;
+    w.end_column = range.end_column;
+    this.warnings.push(w as unknown as WarningByCode[C]);
+    return w as unknown as WarningByCode[C];
+  }
 
-CheckState.warnValue = function <C extends NamedWarning["code"]>(
-  this: CheckStateInstance,
-  code: C,
-  value: { varNode: Range; var: { name: string } },
-  warning?: Partial<
-    Omit<NamedWarningByCode[C], "code" | "line" | "column" | "end_column">
-  >,
-): NamedWarningByCode[C] {
-  const w = this.warnRange(
-    code,
-    value.varNode,
-    warning as Partial<
+  warn<C extends Warning["code"]>(
+    code: C,
+    line: number,
+    offset: number,
+    endOffset: number,
+    warning?: Partial<
       Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
     >,
-  ) as NamedWarningByCode[C];
-  w.name = value.var.name;
-  return w;
-};
+  ): WarningByCode[C] {
+    const w = (warning ?? {}) as Record<string, unknown>;
+    w.code = code;
+    w.line = line;
+    w.column = this.offsetToColumn(line, offset);
+    w.end_column = this.offsetToColumn(line, endOffset);
+    this.warnings.push(w as unknown as WarningByCode[C]);
+    return w as unknown as WarningByCode[C];
+  }
+
+  warnRange<C extends Warning["code"]>(
+    code: C,
+    range: Range,
+    warning?: Partial<
+      Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
+    >,
+  ): WarningByCode[C] {
+    return this.warn(code, range.line, range.offset, range.endOffset, warning);
+  }
+
+  warnVar<C extends NamedWarning["code"]>(
+    code: C,
+    variable: { node: Range; name: string },
+    warning?: Partial<
+      Omit<NamedWarningByCode[C], "code" | "line" | "column" | "end_column">
+    >,
+  ): NamedWarningByCode[C] {
+    const w = this.warnRange(
+      code,
+      variable.node,
+      warning as Partial<
+        Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
+      >,
+    ) as NamedWarningByCode[C];
+    w.name = variable.name;
+    return w;
+  }
+
+  warnValue<C extends NamedWarning["code"]>(
+    code: C,
+    value: { varNode: Range; var: { name: string } },
+    warning?: Partial<
+      Omit<NamedWarningByCode[C], "code" | "line" | "column" | "end_column">
+    >,
+  ): NamedWarningByCode[C] {
+    const w = this.warnRange(
+      code,
+      value.varNode,
+      warning as Partial<
+        Omit<WarningByCode[C], "code" | "line" | "column" | "end_column">
+      >,
+    ) as NamedWarningByCode[C];
+    w.name = value.var.name;
+    return w;
+  }
+}
 
 export function checkStateNew(sourceBytes: string): CheckStateInstance {
-  return CheckState(sourceBytes) as CheckStateInstance;
+  return new CheckState(sourceBytes);
 }

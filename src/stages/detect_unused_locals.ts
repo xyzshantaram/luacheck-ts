@@ -32,7 +32,6 @@ import type {
   Var,
 } from "./linearize.ts";
 import type { ResolvedValue } from "./resolve_locals.ts";
-import { arrayToSet } from "../utils.ts";
 
 /** Length of an AST node's 1-based array part (mirrors parser.ts's private `astLen`). */
 function astLen(node: AstNode): number {
@@ -291,7 +290,7 @@ function isFunctionVar(variable: Var): boolean {
   );
 }
 
-const externallyAccessibleTags = arrayToSet([
+const externallyAccessibleTags = new Set([
   "Id",
   "Index",
   "Call",
@@ -303,7 +302,7 @@ const externallyAccessibleTags = arrayToSet([
 
 function isExternallyAccessible(value: Value): boolean {
   return value.type !== "var" ||
-    !!(value.node && externallyAccessibleTags[value.node.tag as string]);
+    !!(value.node && externallyAccessibleTags.has(value.node.tag as string));
 }
 
 function getOverwritingLhsNode(

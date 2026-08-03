@@ -17,7 +17,6 @@ import type { SyntaxErrorInstance } from "./parser.ts";
 import { SyntaxError } from "./parser.ts";
 import { stages } from "./stages/init.ts";
 import { inlineOptionFields } from "./stages/parse_inline_options.ts";
-import { arrayToSet, isInstance } from "./utils.ts";
 
 export interface CheckResult {
   warnings: Warning[];
@@ -26,7 +25,7 @@ export interface CheckResult {
   line_endings: Record<number, "comment" | "string">;
 }
 
-const inlineOptionFieldsSet = arrayToSet(inlineOptionFields);
+const inlineOptionFieldsSet = new Set(inlineOptionFields);
 
 function codeKey(code: number): string {
   return String(code).padStart(3, "0");
@@ -41,7 +40,7 @@ function validateWarnings(warnings: Warning[]): void {
     }
 
     for (const field of Object.keys(warning)) {
-      if (!info.fields_set[field]) {
+      if (!info.fields_set.has(field)) {
         throw new Error(
           `Unknown field ${field} in issue with code ${warning.code}`,
         );
@@ -53,7 +52,7 @@ function validateWarnings(warnings: Warning[]): void {
 function validateInlineOptions(entries: InlineOptionsEntry[]): void {
   for (const entry of entries) {
     for (const field of Object.keys(entry)) {
-      if (!inlineOptionFieldsSet[field]) {
+      if (!inlineOptionFieldsSet.has(field)) {
         throw new Error(`Unknown field ${field} in inline option table`);
       }
     }
@@ -81,7 +80,7 @@ export function check(source: string): CheckResult {
     lineLengths = chstate.lineLengths;
     lineEndings = chstate.lineEndings;
   } catch (err) {
-    if (!isInstance(err, SyntaxError)) {
+    if (!(err instanceof SyntaxError)) {
       throw err;
     }
 

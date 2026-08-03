@@ -9,7 +9,6 @@
  */
 
 import type { CheckStateInstance, Warning } from "../check_state.ts";
-import { arrayToSet } from "../utils.ts";
 
 import * as parseModule from "./parse.ts";
 import * as unwrapParensModule from "./unwrap_parens.ts";
@@ -43,7 +42,7 @@ interface StageModule {
 export interface StageWarningMeta {
   message_format: string | ((warning: Warning) => string);
   fields: string[];
-  fields_set: Record<string, number>;
+  fields_set: Set<string>;
 }
 
 const BASE_FIELDS = ["code", "line", "column", "end_column"];
@@ -100,7 +99,7 @@ function registerWarnings(newWarnings: Record<string, StageWarning>): void {
     warnings[code] = {
       message_format: warning.message_format,
       fields: fullFields,
-      fields_set: arrayToSet(fullFields),
+      fields_set: new Set(fullFields),
     };
   }
 }

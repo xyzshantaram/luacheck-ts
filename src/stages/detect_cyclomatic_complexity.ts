@@ -21,7 +21,6 @@ import type {
   LocalItem,
   SetItem,
 } from "./linearize.ts";
-import { class as classImpl } from "../utils.ts";
 import type { Stack } from "../utils.ts";
 
 /** Length of an AST node's 1-based array part (mirrors parser.ts's private `astLen`). */
@@ -113,7 +112,7 @@ function warnCyclomaticComplexity(
   }
 }
 
-type StackInstance = ReturnType<typeof Stack>;
+type StackInstance = InstanceType<typeof Stack>;
 
 interface CyclomaticComplexityMetricInstance {
   count: number;
@@ -136,183 +135,135 @@ interface CyclomaticComplexityMetricInstance {
   [key: string]: unknown;
 }
 
-const CyclomaticComplexityMetric = classImpl<
-  CyclomaticComplexityMetricInstance
->();
+class CyclomaticComplexityMetric implements CyclomaticComplexityMetricInstance {
+  declare count: number;
+  [key: string]: unknown;
 
-CyclomaticComplexityMetric.incrDecisions = function (
-  this: CyclomaticComplexityMetricInstance,
-  count: number,
-): void {
-  this.count = this.count + count;
-};
-
-CyclomaticComplexityMetric.calcExpr = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  if (node.tag === "Op" && (node["1"] === "and" || node["1"] === "or")) {
-    this.incrDecisions(1);
+  incrDecisions(count: number): void {
+    this.count = this.count + count;
   }
 
-  if (node.tag !== "Function") {
-    this.calcExprs(node);
-  }
-};
+  calcExpr(node: AstNode): void {
+    if (node.tag === "Op" && (node["1"] === "and" || node["1"] === "or")) {
+      this.incrDecisions(1);
+    }
 
-CyclomaticComplexityMetric.calcExprs = function (
-  this: CyclomaticComplexityMetricInstance,
-  exprs: AstNode,
-): void {
-  const length = astLen(exprs);
-
-  for (let i = 1; i <= length; i++) {
-    const expr = exprs[String(i)];
-    if (typeof expr === "object" && expr !== null) {
-      this.calcExpr(expr as AstNode);
+    if (node.tag !== "Function") {
+      this.calcExprs(node);
     }
   }
-};
 
-CyclomaticComplexityMetric.calcItemEval = function (
-  this: CyclomaticComplexityMetricInstance,
-  item: EvalItem,
-): void {
-  this.calcExpr(item.node);
-};
+  calcExprs(exprs: AstNode): void {
+    const length = astLen(exprs);
 
-CyclomaticComplexityMetric.calcItemLocal = function (
-  this: CyclomaticComplexityMetricInstance,
-  item: LocalItem,
-): void {
-  if (item.rhs) {
+    for (let i = 1; i <= length; i++) {
+      const expr = exprs[String(i)];
+      if (typeof expr === "object" && expr !== null) {
+        this.calcExpr(expr as AstNode);
+      }
+    }
+  }
+
+  calcItemEval(item: EvalItem): void {
+    this.calcExpr(item.node);
+  }
+
+  calcItemLocal(item: LocalItem): void {
+    if (item.rhs) {
+      this.calcExprs(item.rhs);
+    }
+  }
+
+  calcItemSet(item: SetItem): void {
     this.calcExprs(item.rhs);
   }
-};
 
-CyclomaticComplexityMetric.calcItemSet = function (
-  this: CyclomaticComplexityMetricInstance,
-  item: SetItem,
-): void {
-  this.calcExprs(item.rhs);
-};
+  calcItem(item: Item): void {
+    const handler = this[`calcItem${item.tag}`] as
+      | ((this: CyclomaticComplexityMetricInstance, item: Item) => void)
+      | undefined;
 
-CyclomaticComplexityMetric.calcItem = function (
-  this: CyclomaticComplexityMetricInstance,
-  item: Item,
-): void {
-  const handler = this[`calcItem${item.tag}`] as
-    | ((this: CyclomaticComplexityMetricInstance, item: Item) => void)
-    | undefined;
-
-  if (handler) {
-    handler.call(this, item);
+    if (handler) {
+      handler.call(this, item);
+    }
   }
-};
 
-CyclomaticComplexityMetric.calcItems = function (
-  this: CyclomaticComplexityMetricInstance,
-  items: StackInstance,
-): void {
-  for (let i = 1; i <= items.size; i++) {
-    this.calcItem(items[i] as Item);
+  calcItems(items: StackInstance): void {
+    for (let i = 1; i <= items.size; i++) {
+      this.calcItem(items[i] as Item);
+    }
   }
-};
 
-// stmt if: {condition, block; condition, block; ... else_block}
-CyclomaticComplexityMetric.calcStmtIf = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  const length = astLen(node);
+  // stmt if: {condition, block; condition, block; ... else_block}
+  calcStmtIf(node: AstNode): void {
+    const length = astLen(node);
 
-  for (let i = 1; i <= length - 1; i += 2) {
+    for (let i = 1; i <= length - 1; i += 2) {
+      this.incrDecisions(1);
+      this.calcStmts(node[String(i + 1)] as AstNode);
+    }
+
+    if (length % 2 === 1) {
+      this.calcStmts(node[String(length)] as AstNode);
+    }
+  }
+
+  // stmt while: {condition, block}
+  calcStmtWhile(node: AstNode): void {
     this.incrDecisions(1);
-    this.calcStmts(node[String(i + 1)] as AstNode);
+    this.calcStmts(node["2"] as AstNode);
   }
 
-  if (length % 2 === 1) {
-    this.calcStmts(node[String(length)] as AstNode);
+  // stmt repeat: {block, condition}
+  calcStmtRepeat(node: AstNode): void {
+    this.incrDecisions(1);
+    this.calcStmts(node["1"] as AstNode);
   }
-};
 
-// stmt while: {condition, block}
-CyclomaticComplexityMetric.calcStmtWhile = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  this.incrDecisions(1);
-  this.calcStmts(node["2"] as AstNode);
-};
-
-// stmt repeat: {block, condition}
-CyclomaticComplexityMetric.calcStmtRepeat = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  this.incrDecisions(1);
-  this.calcStmts(node["1"] as AstNode);
-};
-
-// stmt forin: {iter_vars, expression_list, block}
-CyclomaticComplexityMetric.calcStmtForin = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  this.incrDecisions(1);
-  this.calcStmts(node["3"] as AstNode);
-};
-
-// stmt fornum: {first_var, expression, expression, expression[optional], block}
-CyclomaticComplexityMetric.calcStmtFornum = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  this.incrDecisions(1);
-  this.calcStmts((node["5"] ?? node["4"]) as AstNode);
-};
-
-CyclomaticComplexityMetric.calcStmt = function (
-  this: CyclomaticComplexityMetricInstance,
-  node: AstNode,
-): void {
-  const handler = this[`calcStmt${node.tag}`] as
-    | ((this: CyclomaticComplexityMetricInstance, node: AstNode) => void)
-    | undefined;
-
-  if (handler) {
-    handler.call(this, node);
+  // stmt forin: {iter_vars, expression_list, block}
+  calcStmtForin(node: AstNode): void {
+    this.incrDecisions(1);
+    this.calcStmts(node["3"] as AstNode);
   }
-};
 
-CyclomaticComplexityMetric.calcStmts = function (
-  this: CyclomaticComplexityMetricInstance,
-  stmts: AstNode,
-): void {
-  const length = astLen(stmts);
-
-  for (let i = 1; i <= length; i++) {
-    this.calcStmt(stmts[String(i)] as AstNode);
+  // stmt fornum: {first_var, expression, expression, expression[optional], block}
+  calcStmtFornum(node: AstNode): void {
+    this.incrDecisions(1);
+    this.calcStmts((node["5"] ?? node["4"]) as AstNode);
   }
-};
 
-// Cyclomatic complexity of a function equals to the number of decision points plus 1.
-CyclomaticComplexityMetric.report = function (
-  this: CyclomaticComplexityMetricInstance,
-  chstate: CheckStateInstance,
-  line: LineInstance,
-): void {
-  this.count = 1;
-  this.calcStmts(line.node["2"] as AstNode);
-  this.calcItems(line.items);
-  warnCyclomaticComplexity(chstate, line, this.count);
-};
+  calcStmt(node: AstNode): void {
+    const handler = this[`calcStmt${node.tag}`] as
+      | ((this: CyclomaticComplexityMetricInstance, node: AstNode) => void)
+      | undefined;
+
+    if (handler) {
+      handler.call(this, node);
+    }
+  }
+
+  calcStmts(stmts: AstNode): void {
+    const length = astLen(stmts);
+
+    for (let i = 1; i <= length; i++) {
+      this.calcStmt(stmts[String(i)] as AstNode);
+    }
+  }
+
+  // Cyclomatic complexity of a function equals to the number of decision points plus 1.
+  report(chstate: CheckStateInstance, line: LineInstance): void {
+    this.count = 1;
+    this.calcStmts(line.node["2"] as AstNode);
+    this.calcItems(line.items);
+    warnCyclomaticComplexity(chstate, line, this.count);
+  }
+}
 
 /**
  * Warns about functions whose cyclomatic complexity is too high.
  */
 export function run(chstate: CheckStateInstance): void {
-  const ccmetric = CyclomaticComplexityMetric();
+  const ccmetric = new CyclomaticComplexityMetric();
 
   for (const line of chstate.lines) {
     ccmetric.report(chstate, line);

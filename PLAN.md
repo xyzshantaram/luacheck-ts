@@ -1011,7 +1011,7 @@ user decision made after ticket 7.1 landed.
 
 ## Phase 8 — Idiomatic TypeScript cleanup
 
-**Status:** pending
+**Status:** complete
 
 Last phase of this plan. Grilled after Phase 4 landed, alongside the Phase 5 ticket
 breakdown, and re-grilled after Phase 7 closed once actual call sites could be checked
@@ -1042,42 +1042,123 @@ remaining targets at all:
 Five tickets remain, ordered dead-code deletions first, then mechanical conversions, then the
 two class conversions with the riskiest one last.
 
-- [ ] Ticket 8.1: Delete `utils.ts`'s unused `try`/`ErrorWrapperImpl`/`tryImpl`/`errorHandler`/
-      `ErrorWrapperInstance` (pcall-with-multi-return emulation) and its unit test. Zero call
-      sites exist anywhere in `src/` outside its own definition and test.
-  - Eval: `grep -rn` for `tryImpl`/`ErrorWrapperImpl`/`errorHandler` across `src/` returns
-    nothing; full `deno task test`/`lint`/`fmt:check`/`check` clean, test count drops by
-    exactly the removed `try`/`ErrorWrapperImpl` steps and nothing else; `git status --short`
-    matches the expected file set.
-- [ ] Ticket 8.2: Convert `ripairs` (5 call sites) and `sortedPairs` (1 call site), both in
+Re-grilled a third time before execution to settle dispatch strategy: tickets 8.1-8.4 are
+mechanical refactors with existing test coverage already acting as a safety net, so each gets
+one `coder` dispatch (no separate test-writing dispatch, matching this phase's own note that
+none of these tickets change behavior). Ticket 8.5 gets a `coder` dispatch to draft the
+conversion, followed by a separate `researcher`-subagent review pass against all 18 stage
+modules' `CheckState` usage, on top of the standing practice of reading every diff yourself
+before commit.
+
+- [x] Ticket 8.1: Deleted `utils.ts`'s unused `try`/`ErrorWrapperImpl`/`tryImpl`/`errorHandler`/
+      `ErrorWrapperInstance` (pcall-with-multi-return emulation) and its unit test. Dispatched
+      as a single `coder` call, no test-writing dispatch (pure deletion, no new behavior).
+  - Eval: `grep -rn` for `tryImpl`/`ErrorWrapperImpl`/`ErrorWrapperInstance`/`errorHandler`
+    across `src/` returns nothing; `deno task test`/`lint`/`fmt:check` and `deno check` all
+    clean; test count dropped from 77 tests/339 steps to 76 tests/336 steps (exactly the
+    removed `try` test and its 3 steps, nothing else); `git status --short` matched the
+    expected file set (`src/utils.ts`, `src/utils_test.ts`). Independently re-confirmed the
+    grep, the test count, and read the `utils.ts` diff end to end before accepting - a clean
+    deletion, nothing else in the file touched.
+- [x] Ticket 8.2: Converted `ripairs` (5 call sites) and `sortedPairs` (1 call site), both in
       `options.ts`, to native reverse-iteration/`Object.keys().sort()` equivalents at each
-      call site. Delete `utils.ts`'s `map` shim and its unit test - zero call sites anywhere
-      in `src/` outside its own definition and test.
+      call site. Deleted `utils.ts`'s `map` shim and its unit test - zero call sites anywhere
+      in `src/` outside its own definition and test. Dispatched as a single `coder` call, no
+      test-writing dispatch (pure conversion, no new behavior).
   - Eval: `grep -rn` for `ripairs`/`sortedPairs`/`\bmap\(` (excluding `.map(`) across `src/`
-    returns nothing outside `options.ts`'s converted call sites; `options_test.ts`'s existing
-    assertions pass unchanged; full suite clean; `git status --short` matches expected files.
-- [ ] Ticket 8.3: Convert all 9 `arrayToSet` call sites (`check.ts`, `parser.ts`,
+    returned nothing; `options_test.ts` untouched, its assertions pass unchanged inside the
+    full suite; `deno task test`/`lint`/`fmt:check` and `deno check` all clean; test count
+    dropped from 76 tests/336 steps to 73 tests/333 steps (exactly the 3 removed shim tests,
+    nothing else); `git status --short` matched the expected file set (`src/options.ts`,
+    `src/utils.ts`, `src/utils_test.ts`). Independently re-confirmed all three greps, the test
+    count, and read the full `options.ts` diff end to end, checking each converted call site's
+    index math against `ripairs`' original 1-based semantics before accepting - all five sites
+    match exactly.
+- [x] Ticket 8.3: Converted all 9 `arrayToSet` call sites (`check.ts`, `parser.ts`,
       `core_utils.ts` x2, `stages/parse_inline_options.ts`, `stages/detect_unused_locals.ts`,
       `stages/linearize.ts`, `stages/detect_globals.ts`, `stages/init.ts`) to `Set<string>` and
-      `.has()`. Confirmed by direct inspection: every one of the 9 sites only ever checks
-      membership, never reads the returned 1-based index value, so the conversion is uniform
-      across all of them with no per-site exceptions.
-  - Eval: `grep -rn arrayToSet` across `src/` returns nothing; `stages/init.ts`'s
-    `StageWarningMeta.fields_set` field retypes to `Set<string>` (internal-only type, not
-    re-exported by `mod.ts`); full suite clean; `git status --short` matches expected files.
-- [ ] Ticket 8.4: Convert the six simpler `classImpl`-based objects - `Stack` (`utils.ts`),
+      `.has()`. Confirmed by direct inspection: every one of the 9 sites only ever checked
+      membership, never read the returned 1-based index value, so the conversion was uniform
+      across all of them with no per-site exceptions. Dispatched as a single `coder` call, no
+      test-writing dispatch (pure conversion, no new behavior).
+  - `stages/init.ts`'s `StageWarningMeta.fields_set` field retyped to `Set<string>` (internal-
+    only type, not re-exported by `mod.ts`), forcing a mechanical follow-up edit in
+    `stages/init_test.ts` (5 `arrayToSet(...)` expected-value constructions switched to
+    `new Set(...)`) - flagged explicitly by the implementer rather than made silently; verified
+    none of those assertions depended on the old return shape (index values), only membership.
+  - Eval: `grep -rn arrayToSet` across `src/` returned nothing; `deno task test`/`lint`/
+    `fmt:check` and `deno check` all clean; test count dropped from 73 tests/333 steps to 72
+    tests/332 steps (exactly the removed `array_to_set` test and its step, nothing else);
+    `git status --short` matched the expected file set - the 8 files holding the 9 call sites,
+    plus `utils.ts`/`utils_test.ts` (the deletion) and `stages/init_test.ts` (the forced
+    follow-up). Independently re-confirmed the grep, the test count, and read every touched
+    file's diff end to end - `core_utils.ts`'s runtime-array-built set, `init.ts`'s type
+    change, and `check.ts`'s two `.has()` sites all match the original truthy-index semantics
+    exactly.
+- [x] Ticket 8.4: Converted the six simpler `classImpl`-based objects - `Stack` (`utils.ts`),
       `SyntaxError`, `UnpairedTokenGuesser` (`parser.ts`), `Line`, `LinState`
       (`stages/linearize.ts`), `CyclomaticComplexityMetric`
-      (`stages/detect_cyclomatic_complexity.ts`) - to real ES classes. `CheckState` is
-      deliberately excluded from this ticket; it gets its own (ticket 8.5).
-  - Eval: `grep -rn classImpl` across `src/` shows only `CheckState`'s remaining use; full
-    suite clean; `git status --short` matches expected files.
-- [ ] Ticket 8.5: Convert `CheckState` (`check_state.ts`) from `classImpl` to a real ES class.
-      Highest-risk conversion in this phase: read and written by all 18 stage modules.
-  - Eval: `grep -rn classImpl` across `src/` returns nothing; full suite clean; **plus an
-    independent spot-check beyond the automated suite** of a few stage modules that read/write
-    `CheckState` fields directly, confirming field access behaves identically after the class
-    conversion; `git status --short` matches expected files.
+      (`stages/detect_cyclomatic_complexity.ts`) - to real ES classes. `CheckState` was left
+      untouched, out of scope for this ticket (its own ticket 8.5). Dispatched as a single
+      `coder` call, no test-writing dispatch (behavior-preserving refactor).
+  - Fields never set in the original `__init` (e.g. `Stack.top`, `SyntaxError.prevLine`/
+    `prevOffset`/`prevEndOffset`, `UnpairedTokenGuesser.state`/`guessed`,
+    `CyclomaticComplexityMetric.count`) use TS `declare` so they stay absent at runtime until
+    first assigned, matching the original's conditional-assignment behavior exactly rather than
+    defaulting them. `LinState`'s 8 method aliases (e.g. `emitStmtCall`/`emitStmtInvoke` both
+    aliasing `emitExpr`) were preserved as `LinState.prototype.x = LinState.prototype.y`
+    assignments after the class body, keeping the same prototype layout and function identity.
+  - One necessary behavior fix, not a silent one: `isInstance(err, SyntaxError)` (the
+    `classImpl` shim's own prototype-equality check, `Object.getPrototypeOf(x) === cl`) breaks
+    under a real ES class, since a real instance's prototype is `Class.prototype`, not `Class`
+    itself. The three call sites (`check.ts`, `parser_test.ts`, `stages/linearize_test.ts`)
+    were switched to `instanceof SyntaxError`, the exact equivalent for a real class. Flagged
+    explicitly by the implementer rather than made silently; independently confirmed the
+    substitution is semantically identical for real classes before accepting.
+  - Eval: `grep -rn classImpl` across `src/` showed only `check_state.ts`'s remaining
+    `CheckState` use; `deno task test`/`lint`/`fmt:check` and `deno check` all clean; test
+    count unchanged at 72 tests/332 steps (pure refactor, no tests added or removed); `git
+    status --short` matched the expected file set. Independently re-confirmed both greps, the
+    test count, and read every touched file's diff end to end, including `LinState`'s full
+    40-method body and its 8 alias assignments (all match the original 1:1 by name and target)
+    and the `SyntaxError`/`UnpairedTokenGuesser` conversions in `parser.ts` (both preserve
+    exact field semantics, including the conditional `prevRange` assignment) - no discrepancy
+    found.
+- [x] Ticket 8.5: Converted `CheckState` (`check_state.ts`) from `classImpl` to a real ES
+      class. Highest-risk conversion in this phase: read and written by all 18 stage modules.
+      Dispatched as a `coder` call, followed by a dedicated `researcher` review pass, per this
+      session's grilling decision.
+  - Constructor sets only `sourceBytes`/`warnings`, matching the old `__init` exactly. The ten
+    other fields plus `inlineOptions` that upstream/earlier stages set post-construction
+    (`lineOffsets`, `lineLengths`, `source`, `ast`, `comments`, `codeLines`, `lineEndings`,
+    `hangingSemicolons`, `topLine`, `lines`) use `declare`, same pattern as ticket 8.4.
+    `checkStateNew` (the sole construction site) now does `new CheckState(sourceBytes)`. No
+    consumer-side changes were needed anywhere: no `isInstance(x, CheckState)` call existed,
+    nothing constructs a CheckState-like object outside `checkStateNew`, and every one of the
+    18 stage modules only ever consumed the `CheckStateInstance` type plus plain field/method
+    access, never `classImpl` internals.
+  - `utils.ts`'s `classImpl`/`class` alias/`LuaClass`/`LuaConstructor`/`isInstance` shim
+    machinery, now with zero remaining consumers (`CheckState` was the last one), was deleted
+    along with its unit tests - closing out the shim entirely.
+  - Eval: `grep -rn classImpl` across `src/` returned nothing; `deno task test`/`lint`/
+    `fmt:check` and `deno check` all clean; test count dropped from 72 tests/332 steps to 71
+    tests/330 steps (exactly the removed shim's own `class` test and its 2 steps, nothing
+    else); `git status --short` matched the expected file set. The dedicated `researcher`
+    review pass independently re-read the full `check_state.ts` diff (confirmed byte-identical
+    method bodies), grepped the whole repo (not just `src/`) for all five deleted shim names
+    (zero hits outside vendored Lua reference files and PLAN.md prose), read all 19 files under
+    `src/stages/` (18 analysis stages plus the `init.ts` registry - PLAN.md's own long-standing
+    "18 stage modules + the registry" split, confirmed against Phase 4's text, not an actual
+    discrepancy) for any shim-specific reliance (found none), specifically checked for
+    enumerable-own-property risks (`for...in`/`Object.keys`/spread/`Object.assign` on a
+    CheckState instance - found none; both old and new forms have the same two own-enumerable
+    fields, methods live on the prototype in both), and independently reran the full suite
+    (same 71/330 result). I then personally spot-checked 3 stage modules chosen for variety
+    (`parse.ts` - the heaviest field-writer; `detect_unused_locals.ts` - heavy `warnVar`/
+    `warnValue` method-call user; `parse_inline_options.ts` - mixed field read/write plus
+    `warnColumnRange`/`offsetToColumn` calls) directly against the new class, confirming every
+    access is a plain field/method touch with no shim reliance, and reran the suite myself
+    (71/330 again) before accepting.
 
 **Explicitly out of scope, deferred:** restructuring `AstNode` (`parser.ts`)'s `node["1"]`/
 `node["2"]`/`node["3"]` positional-key shape into a real discriminated union with named fields
@@ -1086,6 +1167,11 @@ is purely internal (never part of the public output format, unlike `Warning`), b
 positional numeric keys in essentially every one of the 18 stage files, so restructuring it
 would touch all of them a second time. Deferred to its own separate, post-0.1.0 multi-phase
 plan, tracked outside this document.
+
+Phase 8 is now complete: all five tickets landed, the `classImpl`/`class`/`isInstance` shim is
+fully deleted from `utils.ts`, and no dead code remains from the mechanical hand-port stage.
+This closes the plan's last phase; only the deferred `AstNode` restructuring (its own separate
+plan) and any items filed in the Human review queue below remain outstanding.
 
 ## Human review queue
 

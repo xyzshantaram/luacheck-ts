@@ -27,7 +27,6 @@
 
 import { assertEquals } from "@std/assert";
 import { decode } from "./decoder.ts";
-import { isInstance } from "./utils.ts";
 import {
   type AstNode,
   parse,
@@ -89,7 +88,7 @@ function getError(src: string): Record<string, unknown> {
   try {
     getAll(src);
   } catch (err) {
-    if (isInstance(err, SyntaxError)) {
+    if (err instanceof SyntaxError) {
       return { ...(err as Record<string, unknown>) };
     }
     throw err;

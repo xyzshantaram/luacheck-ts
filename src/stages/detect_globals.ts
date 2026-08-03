@@ -22,7 +22,6 @@
 import type { AstNode, AstValue, Range } from "../parser.ts";
 import type { CheckStateInstance, Warning } from "../check_state.ts";
 import type { Item, LineInstance, ScanningItem, Var } from "./linearize.ts";
-import { arrayToSet } from "../utils.ts";
 
 /** Length of an AST node's 1-based array part (mirrors linearize.ts's private `astLen`). */
 function astLen(node: AstNode): number {
@@ -205,7 +204,7 @@ function resolvedToIndex(resolution: NodeResolution): resolution is AstNode {
     resolution.tag !== "String";
 }
 
-const literalTags = arrayToSet([
+const literalTags = new Set([
   "Nil",
   "True",
   "False",
@@ -219,7 +218,7 @@ function resolveNode(node: AstNode, item: ScanningItem): NodeResolution {
   if (node.tag === "Id" || node.tag === "Index") {
     deepResolve(node, item);
     return node.resolution as NodeResolution;
-  } else if (node.tag !== undefined && literalTags[node.tag]) {
+  } else if (node.tag !== undefined && literalTags.has(node.tag)) {
     return node.tag === "String" ? node : "not_string";
   } else {
     return "unknown";

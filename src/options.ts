@@ -15,8 +15,6 @@ import {
   hasType,
   hasTypeOrFalse,
   luaType,
-  ripairs,
-  sortedPairs,
   split,
   strip,
 } from "./utils.ts";
@@ -199,7 +197,9 @@ export function validate(
 
   const resolvedStds = stds ?? builtinStandards;
 
-  for (const [option, validator] of sortedPairs(optionSet)) {
+  for (const option of Object.keys(optionSet).sort()) {
+    const validator = optionSet[option];
+
     if (opts[option] !== undefined) {
       const [ok, err] = validator(opts[option], resolvedStds);
 
@@ -223,7 +223,9 @@ function getStdTables(
   let baseStd: StdTable | undefined;
   const addStds: StdTable[] = [];
 
-  for (const [, opts] of ripairs(optsStack)) {
+  for (let i = optsStack.length - 1; i >= 0; i--) {
+    const opts = optsStack[i];
+
     if (opts.std) {
       if (typeof opts.std === "object") {
         baseStd = opts.std;
@@ -252,9 +254,11 @@ function indexOfLastOptionUsage(
   optsStack: Options[],
   optionName: string,
 ): number {
-  for (const [index, opts] of ripairs(optsStack)) {
+  for (let i = optsStack.length; i >= 1; i--) {
+    const opts = optsStack[i - 1];
+
     if (opts[optionName]) {
-      return index;
+      return i;
     }
   }
 
@@ -396,7 +400,9 @@ function getScalarOpt<T>(
   option: string,
   defaultValue: T,
 ): T {
-  for (const [, opts] of ripairs(optsStack)) {
+  for (let i = optsStack.length - 1; i >= 0; i--) {
+    const opts = optsStack[i];
+
     if (opts[option] !== undefined) {
       return opts[option] as T;
     }
@@ -501,7 +507,9 @@ function getRules(optsStack: Options[]): Rule[] {
   const rules: Rule[] = [];
   const usedMacros: Record<string, boolean> = {};
 
-  for (const [, opts] of ripairs(optsStack)) {
+  for (let i = optsStack.length - 1; i >= 0; i--) {
+    const opts = optsStack[i];
+
     for (const [option, pattern] of macros) {
       if (!usedMacros[option]) {
         if (opts[option] !== undefined) {

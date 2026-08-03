@@ -15,7 +15,6 @@
 
 import type { AstNode } from "./parser.ts";
 import { decode } from "./decoder.ts";
-import { arrayToSet } from "./utils.ts";
 import type { Warning } from "./check_state.ts";
 import type { LineInstance } from "./stages/linearize.ts";
 
@@ -113,7 +112,7 @@ export function evalConstNode(
   }
 }
 
-const statementContainingTags = arrayToSet([
+const statementContainingTags = new Set([
   "Do",
   "While",
   "Repeat",
@@ -133,7 +132,7 @@ function astLen(node: AstNode): number {
 function scanForStatements<Args extends unknown[]>(
   chstate: unknown,
   items: AstNode,
-  tags: Record<string, number>,
+  tags: Set<string>,
   callback: (chstate: unknown, item: AstNode, ...args: Args) => void,
   ...args: Args
 ): void {
@@ -142,11 +141,11 @@ function scanForStatements<Args extends unknown[]>(
   for (let i = 1; i <= length; i++) {
     const item = items[String(i)] as AstNode;
 
-    if (item.tag !== undefined && tags[item.tag]) {
+    if (item.tag !== undefined && tags.has(item.tag)) {
       callback(chstate, item, ...args);
     }
 
-    if (!item.tag || statementContainingTags[item.tag]) {
+    if (!item.tag || statementContainingTags.has(item.tag)) {
       scanForStatements(chstate, item, tags, callback, ...args);
     }
   }
@@ -159,7 +158,7 @@ export function eachStatement<Args extends unknown[]>(
   callback: (chstate: unknown, item: AstNode, ...args: Args) => void,
   ...args: Args
 ): void {
-  const tags = arrayToSet(tagsArray);
+  const tags = new Set(tagsArray);
 
   for (const line of chstate.lines) {
     scanForStatements(

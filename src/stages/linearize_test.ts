@@ -14,14 +14,13 @@
  *
  * `get_line`'s `pcall` + "return the error table if the linearizer threw a
  * structured syntax error, otherwise re-throw" is a try/catch here, using
- * `isInstance`/a plain shallow copy for the same reason `getError` does in
- * parser_test.ts: `assertEquals` treats different-prototype objects as
- * unequal even when their own fields match.
+ * `instanceof SyntaxError`/a plain shallow copy for the same reason
+ * `getError` does in parser_test.ts: `assertEquals` treats different-prototype
+ * objects as unequal even when their own fields match.
  */
 
 import { assertEquals } from "@std/assert";
 import { checkStateNew } from "../check_state.ts";
-import { isInstance } from "../utils.ts";
 import { SyntaxError } from "../parser.ts";
 import { run as parseRun } from "./parse.ts";
 import { run as unwrapParensRun } from "./unwrap_parens.ts";
@@ -53,7 +52,7 @@ function getLine(src: string): LineInstance | Record<string, unknown> {
   try {
     return getLineOrThrow(src);
   } catch (err) {
-    if (isInstance(err, SyntaxError)) {
+    if (err instanceof SyntaxError) {
       return { ...(err as Record<string, unknown>) };
     }
     throw err;

@@ -41,11 +41,11 @@ import {
   SyntaxError,
 } from "../parser.ts";
 import type { CheckStateInstance } from "../check_state.ts";
-import { arrayToSet, class as classImpl, Stack } from "../utils.ts";
+import { Stack } from "../utils.ts";
 import { luaFind } from "../lua_pattern.ts";
 
 function syntaxError(msg: string, range: Range, prevRange?: Range): never {
-  throw SyntaxError(msg, range, prevRange);
+  throw new SyntaxError(msg, range, prevRange);
 }
 
 /** Length of an AST node's 1-based array part (mirrors parser.ts's private `astLen`). */
@@ -147,7 +147,7 @@ const typeCodes = {
   loopi: "3",
 } as const;
 
-const pseudoLabels = arrayToSet(["do", "else", "break", "end", "return"]);
+const pseudoLabels = new Set(["do", "else", "break", "end", "return"]);
 
 const tagToBoolean: Record<string, boolean> = {
   Nil: false,
@@ -262,7 +262,7 @@ export type WalkCallback = (
   ...args: unknown[]
 ) => boolean | void;
 
-type StackInstance = ReturnType<typeof Stack>;
+type StackInstance = InstanceType<typeof Stack>;
 
 export interface LineInstance {
   accessedUpvalues: Map<Var, Item[]>;
@@ -282,50 +282,53 @@ export interface LineInstance {
   [key: string]: unknown;
 }
 
-const Line = classImpl<LineInstance>();
+class Line implements LineInstance {
+  accessedUpvalues: Map<Var, Item[]>;
+  mutatedUpvalues: Map<Var, Item[]>;
+  setUpvalues: Map<Var, Item[]>;
+  lines: LineInstance[];
+  node: AstNode;
+  parent?: LineInstance;
+  value?: Value;
+  items: StackInstance;
+  [key: string]: unknown;
 
-Line.__init = function (
-  obj: Record<string, unknown>,
-  node: unknown,
-  parent?: unknown,
-  value?: unknown,
-) {
-  const self = obj as LineInstance;
-  self.accessedUpvalues = new Map();
-  self.mutatedUpvalues = new Map();
-  self.setUpvalues = new Map();
-  self.lines = [];
-  self.node = node as AstNode;
-  self.parent = parent as LineInstance | undefined;
-  self.value = value as Value | undefined;
-  self.items = Stack();
-};
-
-Line.walk = function (
-  this: LineInstance,
-  visited: Record<number, boolean>,
-  index: number,
-  callback: WalkCallback,
-  ...args: unknown[]
-): void {
-  if (visited[index]) return;
-  visited[index] = true;
-
-  const item = this.items[index] as Item | undefined;
-
-  if (callback(this, index, item, ...args)) return;
-
-  if (!item) return;
-
-  if (item.tag === "Jump") {
-    this.walk(visited, item.to!, callback, ...args);
-    return;
-  } else if (item.tag === "Cjump") {
-    this.walk(visited, item.to!, callback, ...args);
+  constructor(node: AstNode, parent?: LineInstance, value?: Value) {
+    this.accessedUpvalues = new Map();
+    this.mutatedUpvalues = new Map();
+    this.setUpvalues = new Map();
+    this.lines = [];
+    this.node = node;
+    this.parent = parent;
+    this.value = value;
+    this.items = new Stack();
   }
 
-  this.walk(visited, index + 1, callback, ...args);
-};
+  walk(
+    visited: Record<number, boolean>,
+    index: number,
+    callback: WalkCallback,
+    ...args: unknown[]
+  ): void {
+    if (visited[index]) return;
+    visited[index] = true;
+
+    const item = this.items[index] as Item | undefined;
+
+    if (callback(this, index, item, ...args)) return;
+
+    if (!item) return;
+
+    if (item.tag === "Jump") {
+      this.walk(visited, item.to!, callback, ...args);
+      return;
+    } else if (item.tag === "Cjump") {
+      this.walk(visited, item.to!, callback, ...args);
+    }
+
+    this.walk(visited, index + 1, callback, ...args);
+  }
+}
 
 function warnRedefined(
   chstate: CheckStateInstance,
@@ -508,337 +511,512 @@ export interface LinStateInstance {
   [key: string]: unknown;
 }
 
-const LinState = classImpl<LinStateInstance>();
+class LinState implements LinStateInstance {
+  chstate: CheckStateInstance;
+  lines: StackInstance;
+  scopes: StackInstance;
+  [key: string]: unknown;
 
-LinState.__init = function (obj: Record<string, unknown>, chstate: unknown) {
-  const self = obj as LinStateInstance;
-  self.chstate = chstate as CheckStateInstance;
-  self.lines = Stack();
-  self.scopes = Stack();
-};
+  constructor(chstate: CheckStateInstance) {
+    this.chstate = chstate;
+    this.lines = new Stack();
+    this.scopes = new Stack();
+  }
 
-LinState.enterScope = function (this: LinStateInstance) {
-  this.scopes.push(newScope(this.lines.top as LineInstance));
-};
+  enterScope(): void {
+    this.scopes.push(newScope(this.lines.top as LineInstance));
+  }
 
-LinState.leaveScope = function (this: LinStateInstance) {
-  const leftScope = this.scopes.pop() as Scope;
-  const prevScope = this.scopes.top as Scope | undefined;
+  leaveScope(): void {
+    const leftScope = this.scopes.pop() as Scope;
+    const prevScope = this.scopes.top as Scope | undefined;
 
-  for (const goto_ of leftScope.gotos) {
-    const label = leftScope.labels[goto_.name];
+    for (const goto_ of leftScope.gotos) {
+      const label = leftScope.labels[goto_.name];
 
-    if (label) {
-      goto_.jump.to = label.index;
-      label.used = true;
-    } else {
-      if (!prevScope || prevScope.line !== (this.lines.top as LineInstance)) {
-        if (goto_.name === "break") {
-          syntaxError("'break' is not inside a loop", goto_.range!);
-        } else {
-          syntaxError(`no visible label '${goto_.name}'`, goto_.range!);
+      if (label) {
+        goto_.jump.to = label.index;
+        label.used = true;
+      } else {
+        if (!prevScope || prevScope.line !== (this.lines.top as LineInstance)) {
+          if (goto_.name === "break") {
+            syntaxError("'break' is not inside a loop", goto_.range!);
+          } else {
+            syntaxError(`no visible label '${goto_.name}'`, goto_.range!);
+          }
         }
+
+        prevScope!.gotos.push(goto_);
+      }
+    }
+
+    for (const name of Object.keys(leftScope.labels)) {
+      const label = leftScope.labels[name];
+      if (!label.used && !pseudoLabels.has(name)) {
+        warnUnusedLabel(this.chstate, label);
+      }
+    }
+
+    for (const name of Object.keys(leftScope.vars)) {
+      leftScope.vars[name].scopeEnd = (this.lines.top as LineInstance).items
+        .size;
+    }
+  }
+
+  registerVar(node: AstNode, type_: VarKind): Var {
+    const variable = newVar(this.lines.top as LineInstance, node, type_);
+    const prevVar = this.resolveVar(variable.name);
+
+    if (prevVar) {
+      const isSameScope = (this.scopes.top as Scope).vars[variable.name];
+
+      if (variable.name !== "...") {
+        warnRedefined(this.chstate, variable, prevVar, !!isSameScope);
       }
 
-      prevScope!.gotos.push(goto_);
+      if (isSameScope) {
+        prevVar.scopeEnd = (this.lines.top as LineInstance).items.size;
+      }
+    }
+
+    (this.scopes.top as Scope).vars[variable.name] = variable;
+    node.var = variable;
+    return variable;
+  }
+
+  registerVars(nodes: AstNode, type_: VarKind): void {
+    const length = astLen(nodes);
+    for (let i = 1; i <= length; i++) {
+      this.registerVar(nodes[String(i)] as AstNode, type_);
     }
   }
 
-  for (const name of Object.keys(leftScope.labels)) {
-    const label = leftScope.labels[name];
-    if (!label.used && !pseudoLabels[name]) {
-      warnUnusedLabel(this.chstate, label);
+  resolveVar(name: string): Var | undefined {
+    for (let i = this.scopes.size; i >= 1; i--) {
+      const scope = this.scopes[i] as Scope;
+      const variable = scope.vars[name];
+      if (variable) return variable;
+    }
+    return undefined;
+  }
+
+  checkVar(node: AstNode): Var | undefined {
+    if (!node.var) {
+      node.var = this.resolveVar(node["1"] as string);
+    }
+
+    return node.var as Var | undefined;
+  }
+
+  registerLabel(name: string, range?: Range): void {
+    const scope = this.scopes.top as Scope;
+    const prevLabel = scope.labels[name];
+
+    if (prevLabel) {
+      syntaxError(
+        `label '${name}' already defined on line ${prevLabel.range!.line}`,
+        range!,
+        prevLabel.range,
+      );
+    }
+
+    scope.labels[name] = newLabel(this.lines.top as LineInstance, name, range);
+  }
+
+  emit(item: Item): void {
+    (this.lines.top as LineInstance).items.push(item);
+  }
+
+  emitGoto(name: string, isConditional?: boolean, range?: Range): void {
+    const jump = newJumpItem(!!isConditional);
+    this.emit(jump);
+    (this.scopes.top as Scope).gotos.push(newGoto(name, jump, range));
+  }
+
+  emitCondGoto(name: string, condNode: AstNode): void {
+    const condBool = condNode.tag !== undefined
+      ? tagToBoolean[condNode.tag]
+      : undefined;
+
+    if (condBool !== true) {
+      this.emitGoto(name, condBool !== false, condNode as Range);
     }
   }
 
-  for (const name of Object.keys(leftScope.vars)) {
-    leftScope.vars[name].scopeEnd = (this.lines.top as LineInstance).items
-      .size;
+  emitNoop(node: AstNode, loopEnd?: boolean): void {
+    this.emit(newNoopItem(node, loopEnd));
   }
-};
 
-LinState.registerVar = function (
-  this: LinStateInstance,
-  node: AstNode,
-  type_: VarKind,
-): Var {
-  const variable = newVar(this.lines.top as LineInstance, node, type_);
-  const prevVar = this.resolveVar(variable.name);
+  emitStmt(stmt: AstNode): void {
+    const handler = this[`emitStmt${stmt.tag}`] as (
+      this: LinStateInstance,
+      node: AstNode,
+    ) => void;
+    handler.call(this, stmt);
+  }
 
-  if (prevVar) {
-    const isSameScope = (this.scopes.top as Scope).vars[variable.name];
-
-    if (variable.name !== "...") {
-      warnRedefined(this.chstate, variable, prevVar, !!isSameScope);
-    }
-
-    if (isSameScope) {
-      prevVar.scopeEnd = (this.lines.top as LineInstance).items.size;
+  emitStmts(stmts: AstNode): void {
+    const length = astLen(stmts);
+    for (let i = 1; i <= length; i++) {
+      this.emitStmt(stmts[String(i)] as AstNode);
     }
   }
 
-  (this.scopes.top as Scope).vars[variable.name] = variable;
-  node.var = variable;
-  return variable;
-};
-
-LinState.registerVars = function (
-  this: LinStateInstance,
-  nodes: AstNode,
-  type_: VarKind,
-) {
-  const length = astLen(nodes);
-  for (let i = 1; i <= length; i++) {
-    this.registerVar(nodes[String(i)] as AstNode, type_);
-  }
-};
-
-LinState.resolveVar = function (
-  this: LinStateInstance,
-  name: string,
-): Var | undefined {
-  for (let i = this.scopes.size; i >= 1; i--) {
-    const scope = this.scopes[i] as Scope;
-    const variable = scope.vars[name];
-    if (variable) return variable;
-  }
-  return undefined;
-};
-
-LinState.checkVar = function (
-  this: LinStateInstance,
-  node: AstNode,
-): Var | undefined {
-  if (!node.var) {
-    node.var = this.resolveVar(node["1"] as string);
-  }
-
-  return node.var as Var | undefined;
-};
-
-LinState.registerLabel = function (
-  this: LinStateInstance,
-  name: string,
-  range?: Range,
-) {
-  const scope = this.scopes.top as Scope;
-  const prevLabel = scope.labels[name];
-
-  if (prevLabel) {
-    syntaxError(
-      `label '${name}' already defined on line ${prevLabel.range!.line}`,
-      range!,
-      prevLabel.range,
-    );
-  }
-
-  scope.labels[name] = newLabel(this.lines.top as LineInstance, name, range);
-};
-
-LinState.emit = function (this: LinStateInstance, item: Item) {
-  (this.lines.top as LineInstance).items.push(item);
-};
-
-LinState.emitGoto = function (
-  this: LinStateInstance,
-  name: string,
-  isConditional?: boolean,
-  range?: Range,
-) {
-  const jump = newJumpItem(!!isConditional);
-  this.emit(jump);
-  (this.scopes.top as Scope).gotos.push(newGoto(name, jump, range));
-};
-
-LinState.emitCondGoto = function (
-  this: LinStateInstance,
-  name: string,
-  condNode: AstNode,
-) {
-  const condBool = condNode.tag !== undefined
-    ? tagToBoolean[condNode.tag]
-    : undefined;
-
-  if (condBool !== true) {
-    this.emitGoto(name, condBool !== false, condNode as Range);
-  }
-};
-
-LinState.emitNoop = function (
-  this: LinStateInstance,
-  node: AstNode,
-  loopEnd?: boolean,
-) {
-  this.emit(newNoopItem(node, loopEnd));
-};
-
-LinState.emitStmt = function (this: LinStateInstance, stmt: AstNode) {
-  const handler = this[`emitStmt${stmt.tag}`] as (
-    this: LinStateInstance,
-    node: AstNode,
-  ) => void;
-  handler.call(this, stmt);
-};
-
-LinState.emitStmts = function (this: LinStateInstance, stmts: AstNode) {
-  const length = astLen(stmts);
-  for (let i = 1; i <= length; i++) {
-    this.emitStmt(stmts[String(i)] as AstNode);
-  }
-};
-
-LinState.emitBlock = function (this: LinStateInstance, block: AstNode) {
-  this.enterScope();
-  this.emitStmts(block);
-  this.leaveScope();
-};
-
-LinState.emitStmtDo = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.emitBlock(node);
-};
-
-LinState.emitStmtWhile = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.enterScope();
-  this.registerLabel("do");
-  this.emitExpr(node["1"] as AstNode);
-  this.emitCondGoto("break", node["1"] as AstNode);
-  this.emitBlock(node["2"] as AstNode);
-  this.emitNoop(node, true);
-  this.emitGoto("do");
-  this.registerLabel("break");
-  this.leaveScope();
-};
-
-LinState.emitStmtRepeat = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.enterScope();
-  this.registerLabel("do");
-  this.enterScope();
-  this.emitStmts(node["1"] as AstNode);
-  this.emitExpr(node["2"] as AstNode);
-  this.leaveScope();
-  this.emitCondGoto("do", node["2"] as AstNode);
-  this.registerLabel("break");
-  this.leaveScope();
-};
-
-LinState.emitStmtFornum = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.emitExpr(node["2"] as AstNode);
-  this.emitExpr(node["3"] as AstNode);
-
-  if (node["5"] !== undefined) {
-    this.emitExpr(node["4"] as AstNode);
-  }
-
-  this.enterScope();
-  this.registerLabel("do");
-  this.emitGoto("break", true);
-  this.enterScope();
-  this.emit(newLocalItem(arr(arr(node["1"] as AstNode))));
-  this.registerVar(node["1"] as AstNode, "loopi");
-  this.emitStmts((node["5"] ?? node["4"]) as AstNode);
-  this.leaveScope();
-  this.emitNoop(node, true);
-  this.emitGoto("do");
-  this.registerLabel("break");
-  this.leaveScope();
-};
-
-LinState.emitStmtForin = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.emitExprs(node["2"] as AstNode);
-  this.enterScope();
-  this.registerLabel("do");
-  this.emitGoto("break", true);
-  this.enterScope();
-  this.emit(newLocalItem(arr(node["1"] as AstNode)));
-  this.registerVars(node["1"] as AstNode, "loop");
-  this.emitStmts(node["3"] as AstNode);
-  this.leaveScope();
-  this.emitNoop(node, true);
-  this.emitGoto("do");
-  this.registerLabel("break");
-  this.leaveScope();
-};
-
-LinState.emitStmtIf = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.enterScope();
-
-  const length = astLen(node);
-  for (let i = 1; i <= length - 1; i += 2) {
+  emitBlock(block: AstNode): void {
     this.enterScope();
-    this.emitExpr(node[String(i)] as AstNode);
-    this.emitCondGoto("else", node[String(i)] as AstNode);
-    this.emitBlock(node[String(i + 1)] as AstNode);
-    this.emitGoto("end");
-    this.registerLabel("else");
+    this.emitStmts(block);
     this.leaveScope();
   }
 
-  if (length % 2 === 1) {
-    this.emitBlock(node[String(length)] as AstNode);
+  emitStmtDo(node: AstNode): void {
+    this.emitNoop(node);
+    this.emitBlock(node);
   }
 
-  this.registerLabel("end");
-  this.leaveScope();
-};
-
-LinState.emitStmtLabel = function (this: LinStateInstance, node: AstNode) {
-  this.registerLabel(node["1"] as string, node as Range);
-};
-
-LinState.emitStmtGoto = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.emitGoto(node["1"] as string, false, node as Range);
-};
-
-LinState.emitStmtBreak = function (this: LinStateInstance, node: AstNode) {
-  this.emitGoto("break", false, node as Range);
-};
-
-LinState.emitStmtReturn = function (this: LinStateInstance, node: AstNode) {
-  this.emitNoop(node);
-  this.emitExprs(node);
-  this.emitGoto("return");
-};
-
-LinState.emitExpr = function (this: LinStateInstance, node: AstNode) {
-  const item = newEvalItem(node);
-  this.scanExpr(item, node);
-  this.emit(item);
-};
-
-LinState.emitExprs = function (this: LinStateInstance, exprs: AstNode) {
-  const length = astLen(exprs);
-  for (let i = 1; i <= length; i++) {
-    this.emitExpr(exprs[String(i)] as AstNode);
-  }
-};
-
-LinState.emitStmtCall = LinState.emitExpr;
-LinState.emitStmtInvoke = LinState.emitExpr;
-
-LinState.emitStmtLocal = function (this: LinStateInstance, node: AstNode) {
-  const item = newLocalItem(node);
-  this.emit(item);
-
-  if (node["2"] !== undefined) {
-    this.scanExprs(item, node["2"] as AstNode);
+  emitStmtWhile(node: AstNode): void {
+    this.emitNoop(node);
+    this.enterScope();
+    this.registerLabel("do");
+    this.emitExpr(node["1"] as AstNode);
+    this.emitCondGoto("break", node["1"] as AstNode);
+    this.emitBlock(node["2"] as AstNode);
+    this.emitNoop(node, true);
+    this.emitGoto("do");
+    this.registerLabel("break");
+    this.leaveScope();
   }
 
-  this.registerVars(node["1"] as AstNode, "var");
-};
+  emitStmtRepeat(node: AstNode): void {
+    this.emitNoop(node);
+    this.enterScope();
+    this.registerLabel("do");
+    this.enterScope();
+    this.emitStmts(node["1"] as AstNode);
+    this.emitExpr(node["2"] as AstNode);
+    this.leaveScope();
+    this.emitCondGoto("do", node["2"] as AstNode);
+    this.registerLabel("break");
+    this.leaveScope();
+  }
 
-LinState.emitStmtLocalrec = function (this: LinStateInstance, node: AstNode) {
-  const item = newLocalItem(node);
-  this.registerVar((node["1"] as AstNode)["1"] as AstNode, "var");
-  this.emit(item);
-  this.scanExpr(item, (node["2"] as AstNode)["1"] as AstNode);
-};
+  emitStmtFornum(node: AstNode): void {
+    this.emitNoop(node);
+    this.emitExpr(node["2"] as AstNode);
+    this.emitExpr(node["3"] as AstNode);
+
+    if (node["5"] !== undefined) {
+      this.emitExpr(node["4"] as AstNode);
+    }
+
+    this.enterScope();
+    this.registerLabel("do");
+    this.emitGoto("break", true);
+    this.enterScope();
+    this.emit(newLocalItem(arr(arr(node["1"] as AstNode))));
+    this.registerVar(node["1"] as AstNode, "loopi");
+    this.emitStmts((node["5"] ?? node["4"]) as AstNode);
+    this.leaveScope();
+    this.emitNoop(node, true);
+    this.emitGoto("do");
+    this.registerLabel("break");
+    this.leaveScope();
+  }
+
+  emitStmtForin(node: AstNode): void {
+    this.emitNoop(node);
+    this.emitExprs(node["2"] as AstNode);
+    this.enterScope();
+    this.registerLabel("do");
+    this.emitGoto("break", true);
+    this.enterScope();
+    this.emit(newLocalItem(arr(node["1"] as AstNode)));
+    this.registerVars(node["1"] as AstNode, "loop");
+    this.emitStmts(node["3"] as AstNode);
+    this.leaveScope();
+    this.emitNoop(node, true);
+    this.emitGoto("do");
+    this.registerLabel("break");
+    this.leaveScope();
+  }
+
+  emitStmtIf(node: AstNode): void {
+    this.emitNoop(node);
+    this.enterScope();
+
+    const length = astLen(node);
+    for (let i = 1; i <= length - 1; i += 2) {
+      this.enterScope();
+      this.emitExpr(node[String(i)] as AstNode);
+      this.emitCondGoto("else", node[String(i)] as AstNode);
+      this.emitBlock(node[String(i + 1)] as AstNode);
+      this.emitGoto("end");
+      this.registerLabel("else");
+      this.leaveScope();
+    }
+
+    if (length % 2 === 1) {
+      this.emitBlock(node[String(length)] as AstNode);
+    }
+
+    this.registerLabel("end");
+    this.leaveScope();
+  }
+
+  emitStmtLabel(node: AstNode): void {
+    this.registerLabel(node["1"] as string, node as Range);
+  }
+
+  emitStmtGoto(node: AstNode): void {
+    this.emitNoop(node);
+    this.emitGoto(node["1"] as string, false, node as Range);
+  }
+
+  emitStmtBreak(node: AstNode): void {
+    this.emitGoto("break", false, node as Range);
+  }
+
+  emitStmtReturn(node: AstNode): void {
+    this.emitNoop(node);
+    this.emitExprs(node);
+    this.emitGoto("return");
+  }
+
+  emitExpr(node: AstNode): void {
+    const item = newEvalItem(node);
+    this.scanExpr(item, node);
+    this.emit(item);
+  }
+
+  emitExprs(exprs: AstNode): void {
+    const length = astLen(exprs);
+    for (let i = 1; i <= length; i++) {
+      this.emitExpr(exprs[String(i)] as AstNode);
+    }
+  }
+
+  emitStmtLocal(node: AstNode): void {
+    const item = newLocalItem(node);
+    this.emit(item);
+
+    if (node["2"] !== undefined) {
+      this.scanExprs(item, node["2"] as AstNode);
+    }
+
+    this.registerVars(node["1"] as AstNode, "var");
+  }
+
+  emitStmtLocalrec(node: AstNode): void {
+    const item = newLocalItem(node);
+    this.registerVar((node["1"] as AstNode)["1"] as AstNode, "var");
+    this.emit(item);
+    this.scanExpr(item, (node["2"] as AstNode)["1"] as AstNode);
+  }
+
+  emitStmtSet(node: AstNode): void {
+    emitSetLike(this, newSetItem(node), node);
+  }
+
+  emitStmtOpSet(node: AstNode): void {
+    emitSetLike(this, newOpsetItem(node), node);
+  }
+
+  scanExpr(item: Item, node: AstNode): void {
+    const scanner = this[`scanExpr${node.tag}`] as
+      | ((this: LinStateInstance, item: Item, node: AstNode) => void)
+      | undefined;
+
+    if (scanner) {
+      scanner.call(this, item, node);
+    }
+  }
+
+  scanExprs(item: Item, nodes: AstNode): void {
+    const length = astLen(nodes);
+    for (let i = 1; i <= length; i++) {
+      this.scanExpr(item, nodes[String(i)] as AstNode);
+    }
+  }
+
+  registerUpvalueAction(
+    item: Item,
+    variable: Var,
+    key: "accessedUpvalues" | "mutatedUpvalues" | "setUpvalues",
+  ): void {
+    for (let i = this.lines.size; i >= 1; i--) {
+      const line = this.lines[i] as LineInstance;
+      if (line === variable.line) break;
+
+      const map = line[key];
+      if (!map.has(variable)) {
+        map.set(variable, []);
+      }
+      map.get(variable)!.push(item);
+    }
+  }
+
+  markAccess(item: ScanningItem, node: AstNode): void {
+    const variable = node.var as Var;
+    variable.accessed = true;
+
+    if (!item.accesses.has(variable)) {
+      item.accesses.set(variable, []);
+    }
+
+    item.accesses.get(variable)!.push(node);
+    this.registerUpvalueAction(item, variable, "accessedUpvalues");
+  }
+
+  markMutation(item: SetItem, node: AstNode): void {
+    const variable = node.var as Var;
+    variable.mutated = true;
+
+    if (!item.mutations.has(variable)) {
+      item.mutations.set(variable, []);
+    }
+
+    item.mutations.get(variable)!.push(node);
+    this.registerUpvalueAction(item, variable, "mutatedUpvalues");
+  }
+
+  scanExprId(item: ScanningItem, node: AstNode): void {
+    if (this.checkVar(node)) {
+      this.markAccess(item, node);
+    }
+  }
+
+  scanExprDots(item: ScanningItem, node: AstNode): void {
+    const dots = this.checkVar(node);
+
+    if (!dots || dots.line !== (this.lines.top as LineInstance)) {
+      syntaxError("cannot use '...' outside a vararg function", node as Range);
+    }
+
+    this.markAccess(item, node);
+  }
+
+  scanLhsIndex(item: SetItem, node: AstNode): void {
+    const base = node["1"] as AstNode;
+
+    if (base.tag === "Id") {
+      if (this.checkVar(base)) {
+        this.markMutation(item, base);
+      }
+    } else if (base.tag === "Index") {
+      this.scanLhsIndex(item, base);
+    } else {
+      this.scanExpr(item, base);
+    }
+
+    this.scanExpr(item, node["2"] as AstNode);
+  }
+
+  scanExprOp(item: ScanningItem, node: AstNode): void {
+    this.scanExpr(item, node["2"] as AstNode);
+
+    if (node["3"] !== undefined) {
+      this.scanExpr(item, node["3"] as AstNode);
+    }
+  }
+
+  registerSetVariables(): void {
+    const line = this.lines.top as LineInstance;
+
+    for (let i = 1; i <= line.items.size; i++) {
+      const item = line.items[i] as Item;
+
+      if (item.tag !== "Local" && item.tag !== "Set" && item.tag !== "OpSet") {
+        continue;
+      }
+
+      item.setVariables = new Map();
+
+      const isInit = item.tag === "Local";
+      let unpackingItem: AstNode | undefined;
+
+      if (item.rhs) {
+        const rhsLength = astLen(item.rhs);
+        const lastRhsItem = item.rhs[String(rhsLength)] as AstNode;
+
+        if (isUnpacking(lastRhsItem)) {
+          unpackingItem = lastRhsItem;
+        }
+      }
+
+      const lhsLength = astLen(item.lhs);
+      const rhsLength = item.rhs ? astLen(item.rhs) : 0;
+      let secondaries: Secondaries | undefined;
+
+      if (unpackingItem && lhsLength > rhsLength) {
+        secondaries = [];
+      }
+
+      for (let j = 1; j <= lhsLength; j++) {
+        const node = item.lhs[String(j)] as AstNode;
+        let value: Value | undefined;
+
+        if (node.var) {
+          if (item.tag === "OpSet") {
+            this.markAccess(item, node);
+          }
+
+          const rhsNode = (item.rhs?.[String(j)] as AstNode | undefined) ??
+            unpackingItem;
+          value = newValue(node, rhsNode, item, isInit);
+          item.setVariables.set(node.var as Var, value);
+          (node.var as Var).values.push(value);
+        }
+
+        if (secondaries && j >= rhsLength) {
+          if (value) {
+            value.secondaries = secondaries;
+            secondaries.push(value);
+          } else {
+            secondaries.used = true;
+          }
+        }
+      }
+    }
+  }
+
+  buildLine(node: AstNode): LineInstance {
+    this.lines.push(new Line(node, this.lines.top as LineInstance | undefined));
+    this.enterScope();
+    this.emit(newLocalItem(arr(node["1"] as AstNode)));
+    this.enterScope();
+    this.registerVars(node["1"] as AstNode, "arg");
+    this.emitStmts(node["2"] as AstNode);
+    this.leaveScope();
+    this.registerLabel("return");
+    this.leaveScope();
+    this.registerSetVariables();
+    const line = this.lines.pop() as LineInstance;
+
+    for (let i = 1; i <= this.lines.size; i++) {
+      (this.lines[i] as LineInstance).lines.push(line);
+    }
+
+    return line;
+  }
+
+  scanExprFunction(item: ScanningItem, node: AstNode): void {
+    const line = this.buildLine(node);
+    item.lines.push(line);
+
+    for (const nestedLine of line.lines) {
+      item.lines.push(nestedLine);
+    }
+  }
+}
+
+LinState.prototype.emitStmtCall = LinState.prototype.emitExpr;
+LinState.prototype.emitStmtInvoke = LinState.prototype.emitExpr;
+LinState.prototype.scanExprIndex = LinState.prototype.scanExprs;
+LinState.prototype.scanExprCall = LinState.prototype.scanExprs;
+LinState.prototype.scanExprInvoke = LinState.prototype.scanExprs;
+LinState.prototype.scanExprParen = LinState.prototype.scanExprs;
+LinState.prototype.scanExprTable = LinState.prototype.scanExprs;
+LinState.prototype.scanExprPair = LinState.prototype.scanExprs;
+LinState.prototype.scanExprOpSet = LinState.prototype.scanExprOp;
 
 function emitSetLike(
   linstate: LinStateInstance,
@@ -866,257 +1044,13 @@ function emitSetLike(
   linstate.emit(item);
 }
 
-LinState.emitStmtSet = function (this: LinStateInstance, node: AstNode) {
-  emitSetLike(this, newSetItem(node), node);
-};
-
-LinState.emitStmtOpSet = function (this: LinStateInstance, node: AstNode) {
-  emitSetLike(this, newOpsetItem(node), node);
-};
-
-LinState.scanExpr = function (
-  this: LinStateInstance,
-  item: Item,
-  node: AstNode,
-) {
-  const scanner = this[`scanExpr${node.tag}`] as
-    | ((this: LinStateInstance, item: Item, node: AstNode) => void)
-    | undefined;
-
-  if (scanner) {
-    scanner.call(this, item, node);
-  }
-};
-
-LinState.scanExprs = function (
-  this: LinStateInstance,
-  item: Item,
-  nodes: AstNode,
-) {
-  const length = astLen(nodes);
-  for (let i = 1; i <= length; i++) {
-    this.scanExpr(item, nodes[String(i)] as AstNode);
-  }
-};
-
-LinState.registerUpvalueAction = function (
-  this: LinStateInstance,
-  item: Item,
-  variable: Var,
-  key: "accessedUpvalues" | "mutatedUpvalues" | "setUpvalues",
-) {
-  for (let i = this.lines.size; i >= 1; i--) {
-    const line = this.lines[i] as LineInstance;
-    if (line === variable.line) break;
-
-    const map = line[key];
-    if (!map.has(variable)) {
-      map.set(variable, []);
-    }
-    map.get(variable)!.push(item);
-  }
-};
-
-LinState.markAccess = function (
-  this: LinStateInstance,
-  item: ScanningItem,
-  node: AstNode,
-) {
-  const variable = node.var as Var;
-  variable.accessed = true;
-
-  if (!item.accesses.has(variable)) {
-    item.accesses.set(variable, []);
-  }
-
-  item.accesses.get(variable)!.push(node);
-  this.registerUpvalueAction(item, variable, "accessedUpvalues");
-};
-
-LinState.markMutation = function (
-  this: LinStateInstance,
-  item: SetItem,
-  node: AstNode,
-) {
-  const variable = node.var as Var;
-  variable.mutated = true;
-
-  if (!item.mutations.has(variable)) {
-    item.mutations.set(variable, []);
-  }
-
-  item.mutations.get(variable)!.push(node);
-  this.registerUpvalueAction(item, variable, "mutatedUpvalues");
-};
-
-LinState.scanExprId = function (
-  this: LinStateInstance,
-  item: ScanningItem,
-  node: AstNode,
-) {
-  if (this.checkVar(node)) {
-    this.markAccess(item, node);
-  }
-};
-
-LinState.scanExprDots = function (
-  this: LinStateInstance,
-  item: ScanningItem,
-  node: AstNode,
-) {
-  const dots = this.checkVar(node);
-
-  if (!dots || dots.line !== (this.lines.top as LineInstance)) {
-    syntaxError("cannot use '...' outside a vararg function", node as Range);
-  }
-
-  this.markAccess(item, node);
-};
-
-LinState.scanLhsIndex = function (
-  this: LinStateInstance,
-  item: SetItem,
-  node: AstNode,
-) {
-  const base = node["1"] as AstNode;
-
-  if (base.tag === "Id") {
-    if (this.checkVar(base)) {
-      this.markMutation(item, base);
-    }
-  } else if (base.tag === "Index") {
-    this.scanLhsIndex(item, base);
-  } else {
-    this.scanExpr(item, base);
-  }
-
-  this.scanExpr(item, node["2"] as AstNode);
-};
-
-LinState.scanExprIndex = LinState.scanExprs;
-LinState.scanExprCall = LinState.scanExprs;
-LinState.scanExprInvoke = LinState.scanExprs;
-LinState.scanExprParen = LinState.scanExprs;
-LinState.scanExprTable = LinState.scanExprs;
-LinState.scanExprPair = LinState.scanExprs;
-
-LinState.scanExprOp = function (
-  this: LinStateInstance,
-  item: ScanningItem,
-  node: AstNode,
-) {
-  this.scanExpr(item, node["2"] as AstNode);
-
-  if (node["3"] !== undefined) {
-    this.scanExpr(item, node["3"] as AstNode);
-  }
-};
-
-LinState.scanExprOpSet = LinState.scanExprOp;
-
-LinState.registerSetVariables = function (this: LinStateInstance) {
-  const line = this.lines.top as LineInstance;
-
-  for (let i = 1; i <= line.items.size; i++) {
-    const item = line.items[i] as Item;
-
-    if (item.tag !== "Local" && item.tag !== "Set" && item.tag !== "OpSet") {
-      continue;
-    }
-
-    item.setVariables = new Map();
-
-    const isInit = item.tag === "Local";
-    let unpackingItem: AstNode | undefined;
-
-    if (item.rhs) {
-      const rhsLength = astLen(item.rhs);
-      const lastRhsItem = item.rhs[String(rhsLength)] as AstNode;
-
-      if (isUnpacking(lastRhsItem)) {
-        unpackingItem = lastRhsItem;
-      }
-    }
-
-    const lhsLength = astLen(item.lhs);
-    const rhsLength = item.rhs ? astLen(item.rhs) : 0;
-    let secondaries: Secondaries | undefined;
-
-    if (unpackingItem && lhsLength > rhsLength) {
-      secondaries = [];
-    }
-
-    for (let j = 1; j <= lhsLength; j++) {
-      const node = item.lhs[String(j)] as AstNode;
-      let value: Value | undefined;
-
-      if (node.var) {
-        if (item.tag === "OpSet") {
-          this.markAccess(item, node);
-        }
-
-        const rhsNode = (item.rhs?.[String(j)] as AstNode | undefined) ??
-          unpackingItem;
-        value = newValue(node, rhsNode, item, isInit);
-        item.setVariables.set(node.var as Var, value);
-        (node.var as Var).values.push(value);
-      }
-
-      if (secondaries && j >= rhsLength) {
-        if (value) {
-          value.secondaries = secondaries;
-          secondaries.push(value);
-        } else {
-          secondaries.used = true;
-        }
-      }
-    }
-  }
-};
-
-LinState.buildLine = function (
-  this: LinStateInstance,
-  node: AstNode,
-): LineInstance {
-  this.lines.push(Line(node, this.lines.top));
-  this.enterScope();
-  this.emit(newLocalItem(arr(node["1"] as AstNode)));
-  this.enterScope();
-  this.registerVars(node["1"] as AstNode, "arg");
-  this.emitStmts(node["2"] as AstNode);
-  this.leaveScope();
-  this.registerLabel("return");
-  this.leaveScope();
-  this.registerSetVariables();
-  const line = this.lines.pop() as LineInstance;
-
-  for (let i = 1; i <= this.lines.size; i++) {
-    (this.lines[i] as LineInstance).lines.push(line);
-  }
-
-  return line;
-};
-
-LinState.scanExprFunction = function (
-  this: LinStateInstance,
-  item: ScanningItem,
-  node: AstNode,
-) {
-  const line = this.buildLine(node);
-  item.lines.push(line);
-
-  for (const nestedLine of line.lines) {
-    item.lines.push(nestedLine);
-  }
-};
-
 /**
  * Builds a linear representation ("line") of the AST and assigns it as
  * `chstate.topLine`. Assigns an array of all lines as `chstate.lines`.
  * Adds warnings for redefined/shadowed locals and unused labels.
  */
 export function run(chstate: CheckStateInstance): void {
-  const linstate = LinState(chstate);
+  const linstate = new LinState(chstate);
   const dotsNode: AstNode = { tag: "Dots", "1": "..." };
   chstate.topLine = linstate.buildLine(arr(arr(dotsNode), chstate.ast));
 
