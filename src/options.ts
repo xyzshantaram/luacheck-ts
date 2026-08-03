@@ -70,7 +70,7 @@ export interface Options {
 }
 
 export interface NormalizedOptions {
-  std: StdTable;
+  std: FieldDef;
   operators?: string[];
   unused_secondaries: boolean;
   self: boolean;
@@ -585,7 +585,7 @@ export function normalize(
   const maxLineOpts = getMaxLineOpts(optsStack);
 
   return {
-    std: getFinalStd(optsStack, resolvedStds) as StdTable,
+    std: getFinalStd(optsStack, resolvedStds),
     operators: getOperators(optsStack),
     unused_secondaries: getScalarOpt(
       optsStack,

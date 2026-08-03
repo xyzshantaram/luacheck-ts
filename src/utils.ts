@@ -2,9 +2,12 @@
  * Ported from luacheck's utils.lua. `read_file`, `load`, and `load_config`
  * are intentionally not ported: CLI-only filesystem/dynamic-code-loading
  * helpers, out of scope for a browser library (see
- * .reference/PORT_NOTES.md section 4). `unprefix`, `InvalidPatternError`,
- * and `pmatch` stay out of scope; `has_either_type` is dropped, since
- * nothing in the kept `options.lua` port calls it.
+ * .reference/PORT_NOTES.md section 4). `unprefix` and `InvalidPatternError`
+ * stay out of scope; `has_either_type` is dropped, since nothing in the
+ * kept `options.lua` port calls it. `pmatch` is ported for `filter.lua`'s
+ * use, but without the `InvalidPatternError` wrapper: nothing in this port
+ * catches that error type specially, so a malformed pattern just throws
+ * the plain `Error` `lua_pattern.ts` already raises.
  */
 
 import { luaFind, luaGmatch } from "./lua_pattern.ts";
@@ -254,6 +257,15 @@ export function split(str: string, sep?: string): string[] {
 /** Maps `func` over `array`. */
 export function map<T, R>(func: (item: T) => R, array: readonly T[]): R[] {
   return array.map(func);
+}
+
+/**
+ * Behaves like `string.match`, returning whether `pattern` matches
+ * anywhere in `str`. Throws on a malformed pattern, same as Lua's
+ * `pcall(string.match, ...)` failing.
+ */
+export function pmatch(str: string, pattern: string): boolean {
+  return luaFind(str, pattern) !== undefined;
 }
 
 // Exported for later tickets (options.lua's use of class-based error

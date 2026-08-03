@@ -35,7 +35,8 @@ export interface StdTable {
   read_globals?: FieldsTable;
 }
 
-function isArrayIndexKey(key: string): boolean {
+/** True for keys that stand in for Lua's array-part indices in this port's convention (see file header). */
+export function isArrayIndexKey(key: string): boolean {
   return /^(0|[1-9][0-9]*)$/.test(key);
 }
 

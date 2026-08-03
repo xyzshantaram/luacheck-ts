@@ -177,7 +177,7 @@ Deno.test("options", async (t) => {
           fields: {
             baz: { read_only: false, other_fields: true },
           },
-        } as unknown as StdTable);
+        });
       },
     );
 

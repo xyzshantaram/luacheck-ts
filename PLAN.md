@@ -644,11 +644,88 @@ mark unreadable files; `checkStrings(sources: string[], opts?)` takes strings on
     the fix, rather than accepting the report on trust. Independently re-ran the full
     test/lint/fmt/check suite and `git status` after, and read `check.ts`/`format.ts` plus both
     bug-fix diffs end to end against the vendored Lua source before accepting the work.
-- [ ] Ticket 5.2: Port `filter.lua` (544 lines) solo, implemented directly (no separate
-      test-writing dispatch), same treatment as `linearize.ts` in ticket 4.2, given its size and
-      the coupling between its two internal halves (per-warning rule matching plus
-      non-global-related filtering around lines 9-400; cross-file global-related filtering around
-      lines 400-526) through the final `filter.filter` driver. No dependency on Ticket 5.1.
+- [x] Ticket 5.2: Ported `filter.lua` (544 lines, → `src/filter.ts`, 812 lines - mostly doc
+      comments and the parallel-state types the next bullet describes, not code growth) solo,
+      implemented directly, same treatment as `linearize.ts` in ticket 4.2. Ported
+      `filter_spec.lua` (594 lines, a single `describe` block with 16 `it`s) as
+      `src/filter_test.ts` (446 lines, one Deno test, 16 `t.step`s).
+  - Two design decisions, disclosed inline in `filter.ts`'s header, not requiring behavior
+      changes: (1) `filter.lua` stores `.filtered_warnings`/`.normalized_options` as extra
+      dynamic fields bolted onto each check-result table it is handed; this port instead threads
+      them as explicit parallel state (one `FileFilterState` per check result), avoiding a
+      `CheckResult` type where only some instances carry extra fields. (2) The internal
+      options-normalization cache (`CachingOptionsNormalizer`, a `Map`-based trie keyed by option-
+      table identity, replacing Lua's use of tables themselves as hash keys) takes
+      `(optionStack, stds)`, matching `normalize`'s own parameter order, instead of
+      `filter.lua`'s `(stds, option_stack)` - that class is internal-only, so there is no
+      faithfulness reason to keep the mismatch.
+  - Two questions resolved by explicit user decision before implementation started: the `.fatal`
+      result shape (from `check_files`'s I/O-error passthrough) is dropped entirely, not ported -
+      `checkFiles` is already out of scope (ticket 5.1's `checkStrings` note), so nothing can ever
+      construct one; and a pre-existing type bug in `options.ts` was fixed as a prerequisite (see
+      below), rather than worked around locally in `filter.ts`.
+  - Fixed a pre-existing type bug in `options.ts`, found while tracing `filter.ts`'s
+      dependencies, before starting `filter.ts` itself: `NormalizedOptions.std` was declared as
+      `StdTable` (`{globals?, read_globals?}`, the raw user-facing std-config shape) via an
+      `as StdTable` cast, but `normalize()` actually assigns it `getFinalStd(...)`'s real return
+      value, already declared and documented as `FieldDef` (the merged field tree with
+      `.fields`/`.other_fields`/`.read_only`/`.deep_read_only` that `standards.ts`'s `finalize()`
+      operates on) - a real type mismatch, harmless in Lua-derived JS at runtime since nothing
+      there checks types, but a hard blocker for `filter.ts`'s own `get_field_status` port, which
+      needs to read those fields off `normalizedOptions.std`. Fixed by changing the field's
+      declared type to `FieldDef` and dropping the now-unneeded cast; one test-side cast in
+      `options_test.ts` that depended on the wrong type was corrected too (the object literal it
+      compares against already satisfied `FieldDef` structurally, no cast needed at all).
+  - Added `pmatch` to `utils.ts` (`filter.lua`'s own `utils.pmatch`, previously out of scope
+      since nothing needed it before this ticket): a thin wrapper over `lua_pattern.ts`'s
+      `luaFind`, returning whether a pattern matches anywhere in a string. Ported without the
+      Lua source's `InvalidPatternError` wrapper - nothing in this port ever catches that error
+      type specially, so a malformed pattern just throws the plain `Error` `lua_pattern.ts`
+      already raises on one, same as every other `lua_pattern.ts` consumer in this codebase.
+      Exported `standards.ts`'s existing (previously unexported) `isArrayIndexKey` helper for
+      `filter.ts`'s own `mayHaveOptions` to reuse, rather than duplicating the same
+      array-part-key predicate a second time.
+  - `Warning.code` is a plain number in this port (`check.ts`), while `filter.lua` treats it as a
+      zero-padded 3-digit string throughout, for pattern matching and string-prefix code-family
+      checks (e.g. `code:find("^11")`). Every function that needs to pattern-match a code pads it
+      via a local `codeKey` helper first (`check.ts`/`format.ts` already each have their own copy
+      of this exact one-liner; `filter.ts`'s copy is a fourth, flagged here alongside the
+      already-flagged `compact()` duplication as a Phase 8 consolidation candidate, not fixed
+      now), and converts back to a number before writing a new code onto a warning.
+  - Reused the `compact()` helper (first introduced as a bug fix in ticket 5.1, already
+      duplicated 5 times across earlier stage files) for the two places `filter.ts` itself builds
+      a new warning object from fields that may or may not be present - the 021 invalid-inline-
+      option warning (`end_column` is not always set on the triggering inline-option entry) and
+      the 631 line-too-long warning (`line_ending` is absent for code lines). Without it, either
+      case would have produced a real, enumerable `key: undefined` entry in JS where Lua's
+      nil-valued field is simply absent - the same bug ticket 5.1 fixed in `linearize.ts`,
+      confirmed by two test failures during implementation before `compact()` was added
+      (`filter_test.ts`'s "applies inline option events..." and "adds line length warnings"
+      cases, both of which exercise these exact fields). `filter.ts`'s copy is a sixth
+      duplication of `compact()`, also flagged for the same future consolidation.
+  - Ported `filter_global_related_in_file`'s upgrade-warning-code block, including a check that
+      is provably dead code given this port's own fixed-3-character code representation: after
+      the `if code:find("^11[12]")... elseif code:find("^11[23]")...` pair, upstream repeats an
+      unanchored `code:match("11[23]")` check with the identical body, which can only re-evaluate
+      a condition already known false by that point (proven in a header comment at the call
+      site, not acted on) - ported as-is rather than dropped, since simplifying a well-tested
+      upstream library's logic on my own judgment is not this ticket's call to make.
+  - Three `filter_spec.lua` fixtures used std presets this port has already dropped elsewhere
+      (`"max"`, `"min"`, `"none"` - see PORT_NOTES.md section 6 / ticket 4.x's own std-preset
+      trim): substituted `"lua54"` for `"max"`/`"min"` (both cases rely only on `print`/`package`
+      being defined standard globals, which `lua54` also provides) and an empty std table `{}`
+      for `"none"` (both represent zero defined globals). Same substitution approach
+      `options_test.ts` already used for its own dropped-preset fixtures.
+  - Eval: whole-project `deno test` (73 tests/321 steps, up from 72/305), `deno lint`,
+    `deno fmt --check`, `deno check` across every `src/*.ts` and `src/stages/*.ts` file all
+    clean; `git status --short` matched the expected file set exactly - `src/filter.ts`/
+    `src/filter_test.ts` new, `src/options.ts`/`src/options_test.ts` (the type-bug fix),
+    `src/standards.ts` (the `isArrayIndexKey` export), and `src/utils.ts` (the `pmatch` addition)
+    modified, nothing else.
+  - Note: implemented directly, not dispatched, per this ticket's own PLAN.md entry (matching
+    ticket 4.2's precedent). All three fixture-value substitutions above were caught by actually
+    running the ported tests and reading the resulting failures against the vendored Lua source,
+    not decided upfront.
 - [ ] Ticket 5.3: Port top-level `init.lua`'s public API (`getReport`/`processReports`/
       `checkStrings`/`getMessage`) into `src/mod.ts`, replacing its current placeholder in place
       (not a new file). Solo, final ticket of the phase - needs `check.ts` (5.1), `filter.ts`
