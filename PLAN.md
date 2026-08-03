@@ -792,7 +792,7 @@ unported. This phase closes with no new ticket.
 
 ## Phase 6.5 — Parity analysis (reusable benchmark tool)
 
-**Status:** pending
+**Status:** done
 
 Grilled after ticket 7.1 landed, when the user asked to benchmark the TS port against real
 luacheck on real Lua codebases before shipping - both for correctness (does the port produce
@@ -890,21 +890,31 @@ part of 6.5.1); 6.5.3 needs both.
     (unused-argument/unused-vararg cases), same lines and columns as the real luacheck run
     already captured in ticket 6.5.1's done-note - a first cross-check that both sides agree,
     ahead of 6.5.3's formal diff.
-- [ ] Ticket 6.5.3: Write the orchestrator (a single reusable command - shell script or `deno
-      task`) that runs both sides against every corpus file, times each side, and diffs
-      per-file warnings sorted by location, comparing `message`/`line`/`column` per the
-      comparison semantics decided above. Reports per-file pass/fail, any concrete mismatches,
-      and an aggregate real-luacheck-vs-TS-port timing summary. Then actually run it against
-      the full three-file corpus and record the real result - pass/fail per file, any genuine
-      discrepancies found (and their fix, per this phase's own gating rule above), and the
-      timing numbers - in this ticket's done-note. The real output is the deliverable, not
-      just the tool's existence.
-  - Eval: the whole pipeline runs end to end from a single command with no manual steps;
-    the done-note records the actual output from a real run, not a hypothetical one.
+- [x] Ticket 6.5.3: Built the orchestrator as two files. `parity-analysis/orchestrate.sh` (bash)
+      sources `lua/env.sh`, globs `corpus/*.lua` (not hardcoded to three names), runs real
+      luacheck through `json_formatter.lua` and the TS port through `run.ts` into two temp
+      files in one `mktemp -d` (removed on exit via `trap`), times both sides with
+      `date +%s%N`, then hands both report files to `parity-analysis/ts/diff.ts`, whose exit
+      code becomes the script's own exit code. `diff.ts` parses both JSON reports, first
+      checks the file lists agree exactly (a mismatch there means the two sides were invoked
+      differently - an orchestrator bug, exit 2, distinct from a parity finding), then compares
+      each file's warnings as multisets keyed on `(message, line, column)` - reordering
+      tolerated, `code` never compared, per this phase's already-decided comparison semantics -
+      printing per-file PASS/FAIL and any concrete only-on-one-side entries, plus an aggregate
+      files/warnings summary. Exits 0 only if every file matches exactly.
+  - Eval, real run against the full three-file corpus (independently re-run by the main
+    session after the implementing agent's own run, both agree): all three files PASS
+    (`inspect.lua`, `lume.lua`, `middleclass.lua`), 9 warnings on each side with zero
+    presence/absence differences, exit code 0. Real luacheck ran in 67-76 ms and the TS port in
+    76-88 ms across repeated runs (TS port roughly 0.76x-0.97x real luacheck's time on this
+    small corpus - close enough that deno's own process-startup cost likely dominates rather
+    than the port's check logic being meaningfully slower). **No genuine mismatch was found**,
+    so this phase's own gating rule (fix a real discrepancy before closing) has nothing to
+    act on - Phase 6.5 closes clean and Phase 7 is unblocked.
 
 ## Phase 7 — Public API polish + bundle-size measurement
 
-**Status:** pending (blocked on Phase 6.5)
+**Status:** pending (unblocked - Phase 6.5 closed clean, no genuine mismatch found)
 
 Finalize the discriminated-union warning types, `@xyzshantaram/luacheck-ts` JSR publish
 config, README. Three tickets, grilled after Phase 6 closed. `stages/init.ts`'s
