@@ -249,7 +249,7 @@ and has no JS equivalent — ticket 2.1 must also produce a small Lua-pattern-co
 
 ## Phase 4 — Stages (analysis engine)
 
-**Status:** in_progress
+**Status:** complete
 
 18 stage modules + the `stages/init.lua` registry. Ticket boundaries grilled and finalized
 after Phase 3 landed, based on real line counts (`.reference/luacheck/src/luacheck/stages/*.lua`)
@@ -542,9 +542,35 @@ Phase 3 baseline).
     Lua-truthiness translation and the `detect_bad_whitespace.ts` byte/char arithmetic against
     the vendored Lua source, then confirmed the delivered implementations matched line-for-line
     - the same "derive first, verify the delivery matches" practice used for ticket 4.6.
-- [ ] Ticket 4.8: Port `stages/init.lua` (76 lines), the stage registry + warning-metadata
-      table. Solo, final ticket of the phase — requires all 18 stage modules to exist first.
-
+- [x] Ticket 4.8: Ported `stages/init.lua` (76 lines) to `src/stages/init.ts` (143 lines), the
+      stage registry + warning-metadata table. Final ticket of the phase. `stages.names` lists
+      the 18 stage names in canonical run order; `stages.modules` imports and orders the 18
+      stage modules the same way; `stages.warnings` merges every stage's own `warnings` export
+      plus two non-stage codes (011, 631) registered directly, each entry's `fields` widened to
+      the four base fields (code, line, column, end_column) plus the stage's own fields, with a
+      `fields_set` built via `arrayToSet`; `stages.run(chstate)` calls every stage module's `run`
+      in order. No upstream busted spec exists for `stages/init.lua` (confirmed: no matching
+      file under spec/); hand-wrote 8 test steps covering stage-name order, stage-module wiring
+      (spot-checked identity on 5 of 18, not all), warning-metadata merging (the two non-stage
+      codes, a plain-string code with no extra fields, one with extra fields, and the one
+      function-format code), an exact total-registered-code count derived by reading every stage
+      file's own `warnings` export size (54 stage codes + 2 non-stage = 56, cross-checked two
+      ways), and one end-to-end pipeline-ordering test running real source through `stages.run`
+      and checking that a later stage's warning (detect_unused_locals's 211) only appears
+      because the earlier stages it depends on already ran.
+  - Found and fixed one test-file bug directly, not re-dispatched: the test file imported all 18
+      stage modules for potential identity checks but only asserted on 5 of them, leaving 13
+      unused imports that `deno lint` correctly flagged. Removed the 13 unused imports; no
+      behavior or assertion changed.
+  - Eval: whole-project `deno test` (70 tests/272 steps, up from 69/264), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file
+    set exactly - `src/stages/init.ts` and `src/stages/init_test.ts`, nothing else touched.
+  - Note: dispatched as two separate `build` subagent calls (test-writing, then implementation),
+    per this phase's split-dispatch convention. Independently re-ran the full test/lint/fmt/check
+    suite and `git status` after both dispatches, read `src/stages/init.ts` end to end against
+    `.reference/luacheck/src/luacheck/stages/init.lua` line by line, and found the one unused-
+    import lint bug in the test file myself before accepting the work. Phase 4 is now complete:
+    all 18 stage modules plus the registry exist, tested, and verified.
 ## Phase 5 — check.lua + filter.lua + init.lua (compose + public API)
 
 **Status:** pending
