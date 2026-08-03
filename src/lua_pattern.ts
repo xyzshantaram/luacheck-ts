@@ -6,8 +6,8 @@
  * `* + - ?`, anchors `^` `$`, and captures `(...)`.
  *
  * Not supported (unused by anything ported so far): back-references
- * (`%1`-`%9`), `%b` balanced match, `%f` frontier pattern, position
- * captures `()`. Extend here if a later ticket needs one of these.
+ * (`%1`-`%9`), `%b` balanced match, `%f` frontier pattern. Extend here if a
+ * later ticket needs one of these.
  *
  * No JS library implements Lua patterns: they are not regular expressions
  * and have different, incompatible syntax. This is a small hand port of the
@@ -20,6 +20,7 @@ interface Capture {
 }
 
 const CAP_UNFINISHED = -1;
+const CAP_POSITION = -2;
 const MAX_CALLS = 200;
 
 class MatchState {
@@ -177,7 +178,9 @@ function doMatch(ms: MatchState, sIn: number, pIn: number): number | null {
       const pc = ms.pat[p];
 
       if (pc === "(") {
-        return startCapture(ms, s, p + 1);
+        return ms.pat[p + 1] === ")"
+          ? startCapturePosition(ms, s, p + 2)
+          : startCapture(ms, s, p + 1);
       }
 
       if (pc === ")") {
@@ -271,6 +274,18 @@ function startCapture(ms: MatchState, s: number, p: number): number | null {
   return res;
 }
 
+/** A `()` capture with nothing between the parens: records the 1-based match position, not a substring. */
+function startCapturePosition(
+  ms: MatchState,
+  s: number,
+  p: number,
+): number | null {
+  ms.captures.push({ start: s, len: CAP_POSITION });
+  const res = doMatch(ms, s, p);
+  if (res === null) ms.captures.pop();
+  return res;
+}
+
 function endCapture(ms: MatchState, s: number, p: number): number | null {
   let l = -1;
   for (let i = ms.captures.length - 1; i >= 0; i--) {
@@ -287,9 +302,17 @@ function endCapture(ms: MatchState, s: number, p: number): number | null {
   return res;
 }
 
-/** Raw captures for a match; empty if the pattern had no explicit `(...)` groups. */
-function getCaptures(ms: MatchState): string[] {
-  return ms.captures.map((cap) => ms.src.slice(cap.start, cap.start + cap.len));
+/**
+ * Raw captures for a match; empty if the pattern had no explicit `(...)`
+ * groups. A `()` position capture yields the 1-based match position as a
+ * number, matching `string.find`'s own behavior, instead of a substring.
+ */
+function getCaptures(ms: MatchState): (string | number)[] {
+  return ms.captures.map((cap) =>
+    cap.len === CAP_POSITION
+      ? cap.start + 1
+      : ms.src.slice(cap.start, cap.start + cap.len)
+  );
 }
 
 export interface LuaFindResult {
@@ -298,7 +321,7 @@ export interface LuaFindResult {
   /** 0-based, exclusive. */
   end: number;
   /** Raw captures; empty if the pattern had no explicit `(...)` groups (matches `string.find`'s behavior of not returning extra values in that case). */
-  captures: string[];
+  captures: (string | number)[];
 }
 
 /**
@@ -336,7 +359,7 @@ export function luaFind(
 export function* luaGmatch(
   s: string,
   pattern: string,
-): Generator<string | string[]> {
+): Generator<string | number | (string | number)[]> {
   let pos = 0;
 
   while (pos <= s.length) {
@@ -349,7 +372,7 @@ export function* luaGmatch(
     }
 
     const raw = getCaptures(ms);
-    const result: string | string[] = raw.length === 0
+    const result: string | number | (string | number)[] = raw.length === 0
       ? s.slice(pos, e)
       : raw.length === 1
       ? raw[0]

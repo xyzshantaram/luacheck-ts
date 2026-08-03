@@ -247,7 +247,8 @@ function parseInlineComment(
 
   if (pushMatch) {
     opts2 = "push";
-    body = pushMatch.captures[0];
+    // `^push%s+(.*)` has one plain capture group, never a `()` position capture.
+    body = pushMatch.captures[0] as string;
   } else if (body === "push" || body === "pop") {
     return [body, undefined];
   }

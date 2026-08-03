@@ -483,15 +483,65 @@ Phase 3 baseline).
     `CyclomaticComplexityMetric` dispatch/warning logic against the vendored Lua source before
     dispatching (not just after), then confirmed the delivered implementation matched that
     derivation line-for-line - the strongest form of this ticket's independent verification.
-- [ ] Ticket 4.7: Port the 7 smallest detect_* stages together: `detect_bad_whitespace`
-      (76 lines), `detect_unused_fields` (81 lines), `detect_reversed_fornum_loops`
-      (39 lines), `detect_empty_blocks` (36 lines), `detect_unbalanced_assignments`
-      (34 lines), `detect_compound_operators` (34 lines), `detect_empty_statements`
-      (13 lines). `detect_compound_operators` and `detect_empty_statements` have no upstream
-      spec — hand-written tests; the other 5 get their existing busted specs ported
-      (`bad_whitespace_spec.lua` 74 lines, `unused_fields_spec.lua` 46 lines,
-      `reversed_fornum_loops_spec.lua` 87 lines, `empty_blocks_spec.lua` 68 lines,
-      `unbalanced_assignments_spec.lua` 56 lines).
+- [x] Ticket 4.7: Ported the 7 smallest detect_* stages together: `detect_bad_whitespace`
+      (76 lines → `src/stages/detect_bad_whitespace.ts`, 121 lines), `detect_unused_fields`
+      (81 lines → 156 lines), `detect_reversed_fornum_loops` (39 lines → 55 lines),
+      `detect_empty_blocks` (36 lines → 57 lines), `detect_unbalanced_assignments`
+      (34 lines → 64 lines), `detect_compound_operators` (34 lines → 50 lines),
+      `detect_empty_statements` (13 lines → 20 lines). `detect_compound_operators` and
+      `detect_empty_statements` have no upstream spec; wrote hand-written tests for both,
+      grounding every expected line/column/end_column value by running the already-verified
+      `parse`/`unwrap_parens`/`linearize` stages on real source and reading the resulting AST
+      node offsets through `chstate.offsetToColumn`, rather than hand-counting characters (the
+      hand-written `detect_empty_statements` case was independently cross-checked against a
+      real ground-truth example already present in `check_spec.lua` and matched exactly). The
+      other 5 got their existing busted specs ported (`bad_whitespace_spec.lua`, 8 `it`s, not 7
+      as originally estimated; `unused_fields_spec.lua` 2 `it`s + 1 hand-written edge case, see
+      below; `reversed_fornum_loops_spec.lua` 5 `it`s; `empty_blocks_spec.lua` 2 `it`s;
+      `unbalanced_assignments_spec.lua` 2 `it`s).
+  - Prerequisite fix, not itself a ticket: `detect_bad_whitespace.lua`'s trailing-whitespace
+      patterns (`"^[^\r\n]-()[ \t\f\v]+()[\r\n]?$"` etc.) use Lua `()` position captures - an
+      empty `(...)` pair that yields the numeric match position instead of a substring.
+      `src/lua_pattern.ts` never implemented this (documented as an explicit, deliberate gap:
+      "Extend here if a later ticket needs one of these"); no stage ported through 4.6 had
+      needed it. Verified the gap directly: probed `luaFind` with a position-capture pattern
+      against both this port and the real Lua 5.4.8 interpreter and got `["",""]` here vs. the
+      real `4, 7` there. Fixed by detecting `(` immediately followed by `)` at match time and
+      recording the 1-based position instead of a substring (`CAP_POSITION` marker, mirroring
+      Lua's own `lstrlib.c` approach), which widened `LuaFindResult.captures`/`Chars.find`'s
+      return type from `string[]` to `(string | number)[]`; fixed the one call site this broke
+      (`parse_inline_options.ts`'s `pushMatch.captures[0]`, a plain non-position capture, needed
+      an explicit `as string`). Re-verified against the real interpreter post-fix, both via raw
+      `luaFind` and end-to-end through `Chars.find` with both `detect_bad_whitespace.lua`
+      pattern variants (with and without the trailing `?$`) - exact match (`[4,7]` /
+      `[1,7,4,7]` / `[1,6,4,7]`), full suite still green with 0 regressions before continuing.
+  - `detect_unused_fields.ts`'s `check_table` ports Lua's `if key_value then` as
+      `keyValue !== undefined && keyValue !== false`, not a bare truthy check: Lua's only
+      falsy values are `nil` and `false`, so a literal `[0]` or `[""]` table key is truthy in
+      Lua but falsy in JS - a naive `if (keyValue)` would silently and incorrectly stop tracking
+      those keys for duplicate detection. The upstream spec never exercises this, so added one
+      extra hand-written `t.step` (a `[0]` key used twice) specifically to lock this in; it
+      would have passed with the buggy naive translation too if not designed to force the
+      `false`/`0` distinction, so this was checked by reading the implementation directly, not
+      by test-passing alone.
+  - Eval: whole-project `deno test` (69 tests/264 steps, up from 62/241), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file
+    set exactly - 14 new `src/stages/` files (7 stages + 7 test files) plus the 3
+    `lua_pattern.ts`/`decoder.ts`/`parse_inline_options.ts` files from the prerequisite fix, no
+    other files touched.
+  - Note: dispatched as two independent test-writing/implementation dispatch pairs run in
+    parallel where possible - one pair for `detect_bad_whitespace` alone (complex enough on its
+    own, given the byte/char offset reconciliation and position-capture dependency, to warrant
+    isolation from the other six), one pair for the remaining six stages together. This is the
+    first ticket to consume `core_utils.ts`'s `eachStatement` (four of the six stages in the
+    second group use it); no prior call-site precedent existed, so its callback-typing
+    convention (`chstate: unknown` cast inside the callback body) was specified directly in the
+    dispatch brief rather than left for the coder to infer. Independently re-ran the full
+    test/lint/fmt/check suite and `git status` after both implementation dispatches, and
+    independently re-derived (before dispatching, not just after) the `detect_unused_fields.ts`
+    Lua-truthiness translation and the `detect_bad_whitespace.ts` byte/char arithmetic against
+    the vendored Lua source, then confirmed the delivered implementations matched line-for-line
+    - the same "derive first, verify the delivery matches" practice used for ticket 4.6.
 - [ ] Ticket 4.8: Port `stages/init.lua` (76 lines), the stage registry + warning-metadata
       table. Solo, final ticket of the phase — requires all 18 stage modules to exist first.
 

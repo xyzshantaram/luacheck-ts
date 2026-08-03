@@ -38,12 +38,13 @@ export interface Chars {
    * Lua-pattern `find` over the raw bytes; `from` is a 1-based character
    * index, but (matching Lua) results are 1-based *byte* positions. Returns
    * `[start, end, ...captures]`, with no extra values when the pattern has
-   * no explicit captures — mirrors `string.find`.
+   * no explicit captures — mirrors `string.find`. A `()` position capture
+   * yields a 1-based byte position (a number) instead of a substring.
    */
   find(
     pattern: string,
     from: number,
-  ): [number, number, ...string[]] | undefined;
+  ): [number, number, ...(string | number)[]] | undefined;
 }
 
 function hexEscape(byte: number): string {
@@ -79,7 +80,7 @@ class LatinChars implements Chars {
   find(
     pattern: string,
     from: number,
-  ): [number, number, ...string[]] | undefined {
+  ): [number, number, ...(string | number)[]] | undefined {
     const result = luaFind(this.bytes, pattern, from - 1);
     if (!result) return undefined;
     return [result.start + 1, result.end, ...result.captures];
@@ -202,7 +203,7 @@ class UnicodeChars implements Chars {
   find(
     pattern: string,
     from: number,
-  ): [number, number, ...string[]] | undefined {
+  ): [number, number, ...(string | number)[]] | undefined {
     const result = luaFind(this.bytes, pattern, this.byteOffsets[from - 1] - 1);
     if (!result) return undefined;
     return [result.start + 1, result.end, ...result.captures];
