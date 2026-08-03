@@ -44,14 +44,14 @@ import { checkStrings, getMessage, getReport, processReports } from "./mod.ts";
 function stripLocations(reports: Warning[][]): Partial<Warning>[][] {
   return reports.map((warnings) =>
     warnings.map((warning) => {
-      const copy: Partial<Warning> = { ...warning };
+      const copy = { ...warning } as Record<string, unknown>;
       delete copy.line;
       delete copy.column;
       delete copy.end_column;
       delete copy.prev_line;
       delete copy.prev_column;
       delete copy.prev_end_column;
-      return copy;
+      return copy as Partial<Warning>;
     })
   );
 }

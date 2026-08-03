@@ -114,7 +114,7 @@ registerWarnings({
   },
   "631": {
     message_format: "line is too long ({end_column} > {max_length})",
-    fields: [],
+    fields: ["max_length", "line_ending"],
   },
 });
 

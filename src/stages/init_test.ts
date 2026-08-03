@@ -98,8 +98,8 @@ Deno.test("stage registry", async (t) => {
 
       assertEquals(stages.warnings["631"], {
         message_format: "line is too long ({end_column} > {max_length})",
-        fields: BASE_FIELDS,
-        fields_set: arrayToSet(BASE_FIELDS),
+        fields: [...BASE_FIELDS, "max_length", "line_ending"],
+        fields_set: arrayToSet([...BASE_FIELDS, "max_length", "line_ending"]),
       });
     },
   );
@@ -137,6 +137,7 @@ Deno.test("stage registry", async (t) => {
         "complexity",
         "function_type",
         "function_name",
+        "max_complexity",
       ]);
       assertEquals(
         entry.fields_set,
@@ -145,6 +146,7 @@ Deno.test("stage registry", async (t) => {
           "complexity",
           "function_type",
           "function_name",
+          "max_complexity",
         ]),
       );
 
@@ -158,6 +160,8 @@ Deno.test("stage registry", async (t) => {
         column: 1,
         end_column: 1,
         function_type: "main_chunk",
+        complexity: 15,
+        max_complexity: 10,
       });
       assertEquals(
         mainChunkMessage,

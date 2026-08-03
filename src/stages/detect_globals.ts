@@ -59,21 +59,34 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 }
 
 function prefixIfIndirect(message: string): (warning: Warning) => string {
-  return (warning) => warning.indirect ? `indirectly ${message}` : message;
+  return (
+    warning,
+  ) => ("indirect" in warning && warning.indirect
+    ? `indirectly ${message}`
+    : message);
 }
 
 function settingGlobalFormatMessage(warning: Warning): string {
   // `module` field is set during filtering.
-  return warning.module
+  // Registered for code 111 only.
+  return warning.code === 111 && warning.module
     ? "setting non-module global variable {name!}"
     : "setting non-standard global variable {name!}";
 }
+
+const settingGlobalWarningFields = [
+  "name",
+  "indexing",
+  "previous_indexing_len",
+  "top",
+  "indirect",
+  "module",
+];
 
 const globalWarningFields = [
   "name",
   "indexing",
   "previous_indexing_len",
-  "top",
   "indirect",
 ];
 
@@ -85,7 +98,7 @@ interface WarningEntry {
 export const warnings: Record<string, WarningEntry> = {
   "111": {
     message_format: settingGlobalFormatMessage,
-    fields: globalWarningFields,
+    fields: settingGlobalWarningFields,
   },
   "112": {
     message_format: "mutating non-standard global variable {name!}",
@@ -98,34 +111,38 @@ export const warnings: Record<string, WarningEntry> = {
   // The following warnings are added during filtering.
   "121": {
     message_format: "setting read-only global variable {name!}",
-    fields: [],
+    fields: [...globalWarningFields, "top"],
   },
   "122": {
     message_format: prefixIfIndirect(
       "setting read-only field {field!} of global {name!}",
     ),
-    fields: [],
+    fields: [...globalWarningFields, "field"],
   },
-  "131": { message_format: "unused global variable {name!}", fields: [] },
+  "131": {
+    message_format: "unused global variable {name!}",
+    fields: globalWarningFields,
+  },
   "142": {
     message_format: prefixIfIndirect(
       "setting undefined field {field!} of global {name!}",
     ),
-    fields: [],
+    fields: [...globalWarningFields, "field"],
   },
   "143": {
     message_format: prefixIfIndirect(
       "accessing undefined field {field!} of global {name!}",
     ),
-    fields: [],
+    fields: [...globalWarningFields, "field"],
   },
 };
 
-const actionCodes: Record<string, string> = {
-  set: "1",
-  mutate: "2",
-  access: "3",
-};
+/** The warning code for an action: set is 111, mutate is 112, access is 113. */
+function globalCodeForAction(action: string): 111 | 112 | 113 {
+  if (action === "set") return 111;
+  if (action === "mutate") return 112;
+  return 113;
+}
 
 /**
  * `index` describes an indexing, where `index[1]` is a global node
@@ -167,7 +184,7 @@ function warnGlobal(
   }
 
   chstate.warnRange(
-    Number(`11${actionCodes[action]}`),
+    globalCodeForAction(action),
     node as Range,
     compact({
       name: global["1"] as string,
@@ -175,8 +192,8 @@ function warnGlobal(
       previous_indexing_len: index.previous_indexing_len as
         | number
         | undefined,
-      top: (isTopLine && action === "set") || undefined,
-      indirect: (node !== global) || undefined,
+      top: isTopLine && action === "set" ? true : undefined,
+      indirect: node !== global ? true : undefined,
     }),
   );
 }

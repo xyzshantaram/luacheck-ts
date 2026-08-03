@@ -92,7 +92,7 @@ function makeWarning(
   column: number,
   code: number,
 ): Warning {
-  return { code, line, column, end_column: column };
+  return { code, line, column, end_column: column } as unknown as Warning;
 }
 
 Deno.test("sortByLocation - sorts by line, then column, then code, in place", () => {

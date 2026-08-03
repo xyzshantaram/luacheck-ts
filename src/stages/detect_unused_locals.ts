@@ -42,7 +42,8 @@ function astLen(node: AstNode): number {
 }
 
 function unusedLocalMessageFormat(warning: Warning): string {
-  if (warning.func) {
+  // Registered for code 211 only.
+  if (warning.code === 211 && warning.func) {
     if (warning.recursive) {
       return "unused recursive function {name!}";
     } else if (warning.mutually_recursive) {
@@ -56,7 +57,8 @@ function unusedLocalMessageFormat(warning: Warning): string {
 }
 
 function unusedArgMessageFormat(warning: Warning): string {
-  if (warning.name === "...") {
+  // Registered for code 212 only.
+  if (warning.code === 212 && warning.name === "...") {
     return "unused variable length argument";
   } else {
     return "unused argument {name!}";
@@ -76,7 +78,7 @@ interface WarningEntry {
 function unusedOrOverwrittenWarning(messageFormat: string): WarningEntry {
   return {
     message_format: (warning: Warning): string => {
-      if (warning.overwritten_line) {
+      if ("overwritten_line" in warning) {
         return `${messageFormat} is overwritten on line ` +
           "{overwritten_line} before use";
       } else {
@@ -113,7 +115,7 @@ export const warnings: Record<string, WarningEntry> = {
   },
   "221": {
     message_format: "variable {name!} is never set",
-    fields: ["name", "secondary"],
+    fields: ["name"],
   },
   "231": {
     message_format: "variable {name!} is never accessed",
@@ -144,14 +146,6 @@ export const warnings: Record<string, WarningEntry> = {
 function isSecondary(value: Value): boolean | undefined {
   return value.secondaries?.used;
 }
-
-const typeCodes: Record<string, string> = {
-  var: "1",
-  func: "1",
-  arg: "2",
-  loop: "3",
-  loopi: "3",
-};
 
 function varRef(variable: Var): { node: Range; name: string } {
   return { node: variable.node as Range, name: variable.name };
@@ -184,16 +178,27 @@ function warnUnusedVar(
   value: ResolvedValue,
   isUseless?: boolean,
 ): void {
-  chstate.warnValue(
-    Number(`21${typeCodes[value.var.type]}`),
-    valueRef(value),
-    compact({
-      secondary: isSecondary(value) || undefined,
-      func: value.type === "func" || undefined,
-      self: value.var.self,
-      useless: (value.var.name === "_" && isUseless) ? isUseless : undefined,
-    }),
-  );
+  if (value.var.type === "var") {
+    chstate.warnValue(
+      211,
+      valueRef(value),
+      compact({
+        secondary: isSecondary(value) ? true : undefined,
+        func: value.type === "func" ? true : undefined,
+        useless: value.var.name === "_" && isUseless ? true : undefined,
+      }),
+    );
+  } else if (value.var.type === "arg") {
+    // The `self` field is only ever true for arg-type vars (parser sets it
+    // on the implicit self argument of a method definition).
+    chstate.warnValue(
+      212,
+      valueRef(value),
+      compact({ self: value.var.self === true ? true : undefined }),
+    );
+  } else {
+    chstate.warnValue(213, valueRef(value));
+  }
 }
 
 function warnUnaccessedVar(
@@ -212,11 +217,20 @@ function warnUnaccessedVar(
     }
   }
 
-  chstate.warnVar(
-    Number(`2${isMutated ? "4" : "3"}${typeCodes[variable.type]}`),
-    varRef(variable),
-    compact({ secondary }),
-  );
+  if (variable.type === "var") {
+    // 241 for mutated vars, 231 otherwise.
+    chstate.warnVar(
+      isMutated ? 241 : 231,
+      varRef(variable),
+      compact({ secondary }),
+    );
+  } else {
+    // Only var-type vars reach the isMutated branch: both call sites pass
+    // `true` only when the values are not externally accessible, and an
+    // arg/loop var's initial value is always externally accessible. Codes
+    // 242/243 are unreachable by design and have no union variants.
+    chstate.warnVar(variable.type === "arg" ? 232 : 233, varRef(variable));
+  }
 }
 
 function warnUnusedValue(
@@ -224,10 +238,30 @@ function warnUnusedValue(
   value: ResolvedValue,
   overwritingNode?: AstNode,
 ): void {
+  const secondary = isSecondary(value) ? true : undefined;
+
+  if (value.mutated) {
+    // Only var-type values reach the mutated branch: both call sites guard
+    // on isExternallyAccessible, and arg/loop/func values are always
+    // externally accessible. The overwritten_* trio is never set for 331.
+    chstate.warnValue(331, valueRef(value), compact({ secondary }));
+    return;
+  }
+
+  let code: 311 | 312 | 313;
+
+  if (value.type === "var" || value.type === "func") {
+    code = 311;
+  } else if (value.type === "arg") {
+    code = 312;
+  } else {
+    code = 313;
+  }
+
   const warning = chstate.warnValue(
-    Number(`3${value.mutated ? "3" : "1"}${typeCodes[value.type]}`),
+    code,
     valueRef(value),
-    compact({ secondary: isSecondary(value) || undefined }),
+    compact({ secondary }),
   );
 
   if (overwritingNode) {
@@ -512,8 +546,8 @@ function detectUnusedRecFuncs(chstate: CheckStateInstance): void {
                 valueRef(value),
                 compact({
                   func: true,
-                  mutually_recursive: !isSelfRecursive || undefined,
-                  recursive: isSelfRecursive || undefined,
+                  mutually_recursive: !isSelfRecursive ? true : undefined,
+                  recursive: isSelfRecursive ? true : undefined,
                 }),
               );
             } else {

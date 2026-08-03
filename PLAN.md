@@ -773,19 +773,117 @@ composed, tested, and verified.
 
 ## Phase 6 — Remaining integration specs
 
-**Status:** pending
+**Status:** done (no new ticket; scope absorbed into earlier phases)
 
-Top-level/integration busted specs not already covered per-module (`check_spec.lua`,
-`filter_spec.lua`, `globals_spec.lua`, `luacheck_spec.lua`), ported last as an end-to-end
-correctness pass.
+This phase's stated scope was to port the four top-level/integration busted specs not
+already covered per-module: `check_spec.lua`, `filter_spec.lua`, `globals_spec.lua`, and
+`luacheck_spec.lua`. A check against the finished work shows all four were already ported
+in full as a side effect of earlier tickets, before this phase started:
+
+- `check_spec.lua` — ported in ticket 5.1 (`src/check_test.ts`).
+- `filter_spec.lua` — ported in ticket 5.2 (`src/filter_test.ts`).
+- `globals_spec.lua` — ported in ticket 4.5 (`src/stages/detect_globals_test.ts`).
+- `luacheck_spec.lua` — ported in ticket 5.3 (`src/mod_test.ts`).
+
+Every other upstream spec file (`cache_spec.lua`, `cli_spec.lua`, `config_spec.lua`,
+`expand_rockspec_spec.lua`, `fs_spec.lua`, `globbing_spec.lua`, `serializer_spec.lua`)
+covers CLI/filesystem/config code already out of scope for this port. No spec file remains
+unported. This phase closes with no new ticket.
 
 ## Phase 7 — Public API polish + bundle-size measurement
 
 **Status:** pending
 
 Finalize the discriminated-union warning types, `@xyzshantaram/luacheck-ts` JSR publish
-config, README. Eval: report gzipped bundle size after `deno task build`; no hard ceiling,
-tracked only.
+config, README. Three tickets, grilled after Phase 6 closed. `stages/init.ts`'s
+`registerWarnings` calls are the source of truth for each code's registered extra fields,
+cross-checked against the actual construction sites in each stage module - a dedicated
+research pass (see ticket 7.1's own notes) found the registry disagrees with runtime
+reality for several codes. Ticket 7.2 can start once 7.1's types exist; 7.3 has no
+dependency on either.
+
+- [x] Ticket 7.1: Replaced `check_state.ts`'s loose `Warning` interface (a single shape with
+      a `[key: string]: unknown` index signature) with a real discriminated union in a new
+      `src/warnings.ts` (712 lines): one variant per Lua warning code, `code` a single
+      literal number per variant, matching upstream's own code list one-to-one rather than
+      merging codes that happen to share a field shape. Full internal rewrite, not a
+      boundary-only conversion: every one of the 18 stage modules constructs its warnings as
+      the exact typed variant instead of a loose object plus `as Warning`/
+      `as unknown as Warning` cast; `check.ts`, `filter.ts`, and `format.ts` narrow on
+      `.code` where their logic needs a specific variant's fields (`mod.ts` needed no
+      changes - it only ever forwards `Warning[]` generically, never reads a field). Dispatched
+      as the plan skill's "one large ticket, phased internally" pattern: research phase
+      (`researcher`) surveyed the full field mapping; implement phase (`coder`) applied it
+      file by file; independent verification done directly in the primary session instead of
+      a separate dispatched `review`-skill pass, per explicit user decision.
+  - Research findings (corrected this ticket's original framing, written before the research
+    pass ran): the true registered total is **56 codes**, not 44 - the earlier count missed
+    codes 311/312/313 (`detect_unused_locals.ts`) and the whole 411-433 redefinition/shadowing
+    range (`linearize.ts`, built by one shared `warnRedefined` function). All 56 got their own
+    variant.
+  - Several codes' registered `fields` arrays in `stages/init.ts`/the owning stage module
+    disagreed with what is actually constructed at runtime (harmless before this ticket only
+    because `check.ts`'s `validateWarnings` runs before `filter.ts`'s mutations add the
+    missing fields). Per explicit user decision, this ticket also fixed these registrations,
+    not just the new TS types, so both describe the same truth: 111 was missing `module`
+    (set post-hoc by `filter.ts`); 121/122/131/142/143 were registered with `fields: []` but
+    actually carry `name` plus fields inherited from the 111/112/113 warning they derive
+    from, including `field` (122/142/143); 561 was missing `max_complexity` (added by
+    `filter.ts` after the stage runs); 631 was missing `max_length` and `line_ending` (631
+    has no stage-module construction site at all - it is built entirely in `filter.ts`);
+    221/232/241 registered a `secondary` field never actually set at any of their
+    construction sites (dead field), now dropped from their registered arrays.
+  - `filter.ts` used to turn a 111/112/113 warning into 121/122/131/142/143 by mutating
+    `.code` and adding/removing fields on the same object in place. Per explicit user
+    decision, this now constructs a fresh object of the target variant's exact shape from
+    the source warning's fields instead (`toUnusedGlobalWarning`/`toReadOnlyGlobalWarning`/
+    `toUndefinedFieldGlobalWarning`) - a discriminated union cannot represent an object
+    silently changing which variant it is.
+  - Three codes are built from two different call sites with different field subsets each:
+    211 (`warnUnusedVar` vs. `detectUnusedRecFuncs`), 311 (`warnUnusedValue` vs.
+    `detectUnusedRecFuncs`), and 561 (main-chunk vs. nested-function construction, main chunk
+    omits `function_name`).
+  - Codes 242/243 are computable by the shared formula in `detect_unused_locals.ts` but
+    every actual call site is guarded so they are provably unreachable. Per explicit user
+    decision, they are left out of the union entirely.
+  - Found and fixed a real bug during independent verification (reading `filter.ts`'s diff
+    line-by-line against the vendored Lua source, not just running the test suite):
+    `passesFilter`'s global-related branch used the coder's new `isGlobalWarning()` guard,
+    which matches all 8 global-derived codes (111/112/113/121/122/131/142/143). Upstream's
+    equivalent check (`filter.lua`'s `warning.code:find("^1[14]")`) matches only 5 of them
+    (111/112/113/142/143) - 121/122/131 are excluded on purpose, since by the time a warning
+    carries one of those codes its definedness/read-only status has already been resolved by
+    `filterGlobalRelatedInFile`, and re-running the check against it incorrectly re-filters
+    it. The bug silently dropped every 121/122/131 warning from the final report - caught by
+    `filter_test.ts`'s existing "applies inline option events and per-line options" step
+    once independent verification ran the suite fresh. Fixed by adding a narrower
+    `isGlobalFieldStatusWarning` type guard (`warnings.ts`) matching upstream's exact 5-code
+    set and switching the call site to it.
+  - Eval: zero remaining `as Warning`/`as unknown as Warning` casts anywhere under
+    `src/stages/` (confirmed via `grep -rn`, no matches); full `deno task test` back to
+    77 passed/339 steps/0 failed - the same count as before this ticket, confirming the
+    typing refactor plus the `filter.ts` reconstruction/registry fixes/bug fix change no
+    observable warning field values, only how each object reaches its shape; `deno lint`,
+    `deno fmt --check`, and `deno check` across every non-test and test file under `src/`
+    all clean; `deno task build` still produces a working browser bundle (82.85KB, up from
+    81.25KB); `git status --short` matched the expected file set - `src/warnings.ts` new,
+    `check_state.ts`/`check.ts`/`filter.ts`/`format.ts` plus 8 stage modules and 7 test files
+    modified, nothing else.
+- [ ] Ticket 7.2: Write `README.md` from scratch (none exists yet) - install snippet plus a
+      minimal `checkStrings` usage example, and a scope/parity-notes section stating what
+      this port deliberately excludes vs upstream luacheck (no CLI, no file I/O, no
+      config/cache/rockspec handling, `lua54`-only std preset), so a JSR user does not
+      assume full CLI-luacheck parity. No warning-code reference table and no hand-written
+      full API reference in the README - JSR's own doc viewer covers exported
+      function/type signatures from existing JSDoc comments. Also finalize
+      `@xyzshantaram/luacheck-ts`'s `deno.json` publish config (add `description`/`license`
+      fields if `deno publish --dry-run` flags their absence; `.reference/`/`dist/` are
+      already git-ignored so already excluded from the publish set).
+  - Eval: README passes an `ste-writing` self-lint pass; `deno publish --dry-run
+    --allow-dirty` passes cleanly; a manual read-through by the user before commit.
+- [ ] Ticket 7.3: Run `deno task build`, gzip the resulting `dist/luacheck-ts.bundle.js`,
+      and record both the raw and gzipped size in this ticket's done-note. No hard ceiling -
+      tracked for growth visibility only. Trivial, done directly, no dispatch.
 
 ## Phase 8 — Idiomatic TypeScript cleanup
 

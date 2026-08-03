@@ -9,7 +9,7 @@
  * asserts on the resulting AST shape and/or `chstate.warnings`.
  */
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import type { AstNode } from "../parser.ts";
 import { parse } from "../parser.ts";
 import { decode } from "../decoder.ts";
@@ -94,7 +94,8 @@ Deno.test("run - warns 581 for 'not (a == b)' with the replacement operator", ()
   run(chstate);
 
   assertEquals(chstate.warnings.length, 1);
-  assertEquals(chstate.warnings[0].code, 581);
-  assertEquals(chstate.warnings[0].operator, "==");
-  assertEquals(chstate.warnings[0].replacement_operator, "~=");
+  const warning = chstate.warnings[0];
+  assert(warning.code === 581);
+  assertEquals(warning.operator, "==");
+  assertEquals(warning.replacement_operator, "~=");
 });

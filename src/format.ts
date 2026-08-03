@@ -34,7 +34,11 @@ function substitute(format: string, warning: Warning): string {
   return format.replace(
     /\{([_a-zA-Z0-9]+)(!?)\}/g,
     (_match, fieldName: string, highlight: string) => {
-      const fieldValue = warning[fieldName];
+      // Field names in a message format are dynamic, so read them through
+      // the union's keys rather than narrowing on `code`.
+      const fieldValue = (warning as unknown as Record<string, unknown>)[
+        fieldName
+      ];
 
       if (fieldValue === undefined) {
         throw new Error(`No field ${fieldName}`);

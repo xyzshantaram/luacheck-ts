@@ -10,6 +10,7 @@
  */
 
 import type { InlineOptionsEntry, Warning } from "./check_state.ts";
+import type { SyntaxErrorWarning } from "./warnings.ts";
 import { checkStateNew } from "./check_state.ts";
 import { sortByLocation } from "./core_utils.ts";
 import type { SyntaxErrorInstance } from "./parser.ts";
@@ -85,7 +86,7 @@ export function check(source: string): CheckResult {
     }
 
     const syntaxErr = err as SyntaxErrorInstance;
-    const warning: Warning = {
+    const warning: SyntaxErrorWarning = {
       code: 11,
       line: syntaxErr.line,
       column: chstate.offsetToColumn(syntaxErr.line, syntaxErr.offset),

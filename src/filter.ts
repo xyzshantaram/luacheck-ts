@@ -26,7 +26,22 @@
 
 import { sortByLocation } from "./core_utils.ts";
 import { decode } from "./decoder.ts";
-import type { InlineOptionsEntry, Warning } from "./check_state.ts";
+import type { InlineOptionsEntry } from "./check_state.ts";
+import { isGlobalFieldStatusWarning } from "./warnings.ts";
+import type {
+  AccessingGlobalWarning,
+  AccessingUndefinedFieldOfGlobalWarning,
+  GlobalWarning,
+  InvalidInlineOptionWarning,
+  LineTooLongWarning,
+  MutatingGlobalWarning,
+  SettingGlobalWarning,
+  SettingReadOnlyFieldOfGlobalWarning,
+  SettingReadOnlyGlobalWarning,
+  SettingUndefinedFieldOfGlobalWarning,
+  UnusedGlobalWarning,
+  Warning,
+} from "./warnings.ts";
 import type { CheckResult } from "./check.ts";
 import {
   allOptions,
@@ -153,9 +168,9 @@ function passesRulesFilter(
   return true;
 }
 
-function getFieldString(warning: Warning): string {
+function getFieldString(warning: GlobalWarning): string {
   const parts: string[] = [];
-  const indexing = warning.indexing as (boolean | string)[] | undefined;
+  const indexing = warning.indexing;
 
   if (indexing) {
     for (const index of indexing) {
@@ -173,18 +188,18 @@ function getFieldString(warning: Warning): string {
 
 function getFieldStatus(
   normalizedOptions: NormalizedOptions,
-  warning: Warning,
+  warning: GlobalWarning,
   depth?: number,
 ): "read_only" | "global" | "undefined" {
   let def = normalizedOptions.std;
   let defined = true;
   let readOnly = true;
-  const indexing = warning.indexing as (boolean | string)[] | undefined;
+  const indexing = warning.indexing;
   const limit = depth ?? (indexing ? indexing.length : 0) + 1;
 
   for (let i = 1; i <= limit; i++) {
     const indexString: boolean | string = i === 1
-      ? (warning.name as string)
+      ? warning.name
       : indexing![i - 2];
 
     if (indexString === true) {
@@ -228,6 +243,21 @@ function getFieldStatus(
   return defined ? (readOnly ? "read_only" : "global") : "undefined";
 }
 
+/** Returns whether a warning is a "secondary" value warning. */
+function isSecondaryWarning(warning: Warning): boolean {
+  return "secondary" in warning && warning.secondary === true;
+}
+
+/** Returns whether a warning is about an implicit self argument. */
+function isSelfWarning(warning: Warning): boolean {
+  return "self" in warning && warning.self === true;
+}
+
+/** Returns whether a warning is about a useless (unused-hint) variable. */
+function isUselessWarning(warning: Warning): boolean {
+  return warning.code === 211 && warning.useless === true;
+}
+
 /** Checks if a warning passes the options filter. May add fields required for formatting. */
 function passesFilter(
   normalizedOptions: NormalizedOptions,
@@ -235,15 +265,15 @@ function passesFilter(
 ): boolean {
   const code = codeKey(warning.code);
 
-  if (code === "561") {
+  if (warning.code === 561) {
     const maxComplexity = normalizedOptions.max_cyclomatic_complexity;
 
-    if (!maxComplexity || (warning.complexity as number) <= maxComplexity) {
+    if (!maxComplexity || warning.complexity <= maxComplexity) {
       return false;
     }
 
     warning.max_complexity = maxComplexity;
-  } else if (code === "033") {
+  } else if (warning.code === 33) {
     const operators = normalizedOptions.operators ?? [];
 
     for (const op of operators) {
@@ -253,41 +283,44 @@ function passesFilter(
     }
 
     return true;
-  } else if (/^[234]/.test(code) && warning.name === "_" && !warning.useless) {
+  } else if (
+    /^[234]/.test(code) && "name" in warning && warning.name === "_" &&
+    !isUselessWarning(warning)
+  ) {
     return false;
-  } else if (/^1[14]/.test(code)) {
+  } else if (isGlobalFieldStatusWarning(warning)) {
     if (
       warning.indirect &&
       getFieldStatus(
           normalizedOptions,
           warning,
-          warning.previous_indexing_len as number | undefined,
+          warning.previous_indexing_len,
         ) === "undefined"
     ) {
       return false;
     }
 
     if (
-      !warning.module &&
+      !(warning.code === 111 && warning.module) &&
       getFieldStatus(normalizedOptions, warning) !== "undefined"
     ) {
       return false;
     }
   }
 
-  if (/^1[24][23]/.test(code)) {
-    warning.field = getFieldString(warning);
-  }
-
-  if (warning.secondary && !normalizedOptions.unused_secondaries) {
+  if (isSecondaryWarning(warning) && !normalizedOptions.unused_secondaries) {
     return false;
   }
 
-  if (warning.self && !normalizedOptions.self) {
+  if (isSelfWarning(warning) && !normalizedOptions.self) {
     return false;
   }
 
-  return passesRulesFilter(normalizedOptions.rules, code, warning.name);
+  return passesRulesFilter(
+    normalizedOptions.rules,
+    code,
+    "name" in warning ? warning.name : undefined,
+  );
 }
 
 const emptyOptions: Options = {};
@@ -337,7 +370,7 @@ function updateOptionStackForNewLine(
       column: inlineOption.column,
       end_column: inlineOption.end_column,
       msg: errMsg,
-    }) as Warning);
+    }) as InvalidInlineOptionWarning);
     optionStack.push(emptyOptions);
   } else {
     optionStack.push(inlineOption.options);
@@ -370,7 +403,7 @@ function checkLineLength(
         end_column: lineLength,
         max_length: maxLength,
         line_ending: lineType,
-      }) as Warning);
+      }) as LineTooLongWarning);
     }
   }
 }
@@ -592,7 +625,7 @@ function filterNotGlobalRelated(
 
 function isDefinition(
   normalizedOptions: NormalizedOptions,
-  warning: Warning,
+  warning: SettingGlobalWarning,
 ): boolean {
   return normalizedOptions.allow_defined ||
     (normalizedOptions.allow_defined_top && Boolean(warning.top));
@@ -608,24 +641,18 @@ function getImplicitGlobalsInFile(
   const used = new Set<string>();
 
   for (const warning of checkResult.warnings) {
-    const code = codeKey(warning.code);
-
-    if (!code.startsWith("11")) {
-      continue;
-    }
-
-    if (code === "111") {
+    if (warning.code === 111) {
       const normalizedOptions = normalizedOptionsByLine.get(warning.line)!;
 
       if (isDefinition(normalizedOptions, warning)) {
         if (normalizedOptions.module) {
-          defined.add(warning.name!);
+          defined.add(warning.name);
         } else {
-          exported.add(warning.name!);
+          exported.add(warning.name);
         }
       }
-    } else {
-      used.add(warning.name!);
+    } else if (warning.code === 112 || warning.code === 113) {
+      used.add(warning.name);
     }
   }
 
@@ -662,50 +689,130 @@ function getImplicitGlobals(
   return { globallyDefined, globallyUsed, locallyDefined };
 }
 
-/** Mutates the warning and returns it, or discards it by returning `undefined` if it's filtered out. */
+type GlobalActionWarning =
+  | SettingGlobalWarning
+  | MutatingGlobalWarning
+  | AccessingGlobalWarning;
+
+/** Builds a fresh 131 warning from a 111 one, dropping the `top` field. */
+function toUnusedGlobalWarning(
+  source: SettingGlobalWarning,
+): UnusedGlobalWarning {
+  return compact({
+    code: 131,
+    line: source.line,
+    column: source.column,
+    end_column: source.end_column,
+    name: source.name,
+    indexing: source.indexing,
+    previous_indexing_len: source.previous_indexing_len,
+    indirect: source.indirect,
+  }) as UnusedGlobalWarning;
+}
+
+/** Builds a fresh 121/122 warning from a 111/112 one. */
+function toReadOnlyGlobalWarning(
+  source: SettingGlobalWarning | MutatingGlobalWarning,
+): SettingReadOnlyGlobalWarning | SettingReadOnlyFieldOfGlobalWarning {
+  if (source.code === 111) {
+    return compact({
+      code: 121,
+      line: source.line,
+      column: source.column,
+      end_column: source.end_column,
+      name: source.name,
+      indexing: source.indexing,
+      previous_indexing_len: source.previous_indexing_len,
+      top: source.top,
+      indirect: source.indirect,
+    }) as SettingReadOnlyGlobalWarning;
+  }
+
+  return compact({
+    code: 122,
+    line: source.line,
+    column: source.column,
+    end_column: source.end_column,
+    name: source.name,
+    indexing: source.indexing,
+    previous_indexing_len: source.previous_indexing_len,
+    indirect: source.indirect,
+    field: getFieldString(source),
+  }) as SettingReadOnlyFieldOfGlobalWarning;
+}
+
+/** Builds a fresh 142/143 warning from a 112/113 one. */
+function toUndefinedFieldGlobalWarning(
+  source: MutatingGlobalWarning | AccessingGlobalWarning,
+):
+  | SettingUndefinedFieldOfGlobalWarning
+  | AccessingUndefinedFieldOfGlobalWarning {
+  if (source.code === 112) {
+    return compact({
+      code: 142,
+      line: source.line,
+      column: source.column,
+      end_column: source.end_column,
+      name: source.name,
+      indexing: source.indexing,
+      previous_indexing_len: source.previous_indexing_len,
+      indirect: source.indirect,
+      field: getFieldString(source),
+    }) as SettingUndefinedFieldOfGlobalWarning;
+  }
+
+  return compact({
+    code: 143,
+    line: source.line,
+    column: source.column,
+    end_column: source.end_column,
+    name: source.name,
+    indexing: source.indexing,
+    previous_indexing_len: source.previous_indexing_len,
+    indirect: source.indirect,
+    field: getFieldString(source),
+  }) as AccessingUndefinedFieldOfGlobalWarning;
+}
+
+/** Returns a fresh warning with implicit definitions applied, or `undefined` if it's filtered out. */
 function applyImplicitDefinitions(
   globallyDefined: Set<string>,
   globallyUsed: Set<string>,
   locallyDefined: Set<string>,
   normalizedOptions: NormalizedOptions,
-  warning: Warning,
-): Warning | undefined {
-  const code = codeKey(warning.code);
-
-  if (!code.startsWith("11")) {
-    return warning;
-  }
-
-  if (code === "111") {
+  original: GlobalActionWarning,
+): GlobalActionWarning | UnusedGlobalWarning | undefined {
+  if (original.code === 111) {
     if (normalizedOptions.module) {
-      if (locallyDefined.has(warning.name!)) {
+      if (locallyDefined.has(original.name)) {
         return undefined;
       }
 
-      warning.module = true;
-    } else {
-      if (isDefinition(normalizedOptions, warning)) {
-        if (globallyUsed.has(warning.name!)) {
-          return undefined;
-        }
-
-        warning.code = 131;
-        delete warning.top;
-      } else {
-        if (globallyDefined.has(warning.name!)) {
-          return undefined;
-        }
-      }
+      return { ...original, module: true };
     }
-  } else {
-    if (
-      globallyDefined.has(warning.name!) || locallyDefined.has(warning.name!)
-    ) {
+
+    if (isDefinition(normalizedOptions, original)) {
+      if (globallyUsed.has(original.name)) {
+        return undefined;
+      }
+
+      return toUnusedGlobalWarning(original);
+    }
+
+    if (globallyDefined.has(original.name)) {
       return undefined;
     }
+
+    return original;
   }
 
-  return warning;
+  if (
+    globallyDefined.has(original.name) || locallyDefined.has(original.name)
+  ) {
+    return undefined;
+  }
+
+  return original;
 }
 
 function filterGlobalRelatedInFile(
@@ -717,12 +824,15 @@ function filterGlobalRelatedInFile(
   locallyDefined: Set<string>,
 ): void {
   for (const original of checkResult.warnings) {
-    if (!codeKey(original.code).startsWith("1")) {
+    if (
+      original.code !== 111 && original.code !== 112 &&
+      original.code !== 113
+    ) {
       continue;
     }
 
     const normalizedOptions = normalizedOptionsByLine.get(original.line)!;
-    const warning = applyImplicitDefinitions(
+    let warning: GlobalWarning | undefined = applyImplicitDefinitions(
       globallyDefined,
       globallyUsed,
       locallyDefined,
@@ -734,33 +844,23 @@ function filterGlobalRelatedInFile(
       continue;
     }
 
-    const code = codeKey(warning.code);
-
-    if (
-      /^11[12]/.test(code) && !warning.module &&
-      getFieldStatus(normalizedOptions, warning) === "read_only"
-    ) {
-      warning.code = Number("12" + code[2]);
-    } else if (
-      /^11[23]/.test(code) &&
-      getFieldStatus(normalizedOptions, warning, 1) !== "undefined"
-    ) {
-      warning.code = Number("14" + code[2]);
+    // A read-only or undefined-field global is reported under a different
+    // code; each conversion builds a fresh object of the target variant.
+    if (warning.code === 111 || warning.code === 112) {
+      if (
+        !(warning.code === 111 && warning.module) &&
+        getFieldStatus(normalizedOptions, warning) === "read_only"
+      ) {
+        warning = toReadOnlyGlobalWarning(warning);
+      }
     }
 
-    // Upstream `filter.lua` repeats this exact check (unanchored, "11[23]" instead of "^11[23]")
-    // right after the if/elseif above. Since every code here is a fixed 3-character string, an
-    // unanchored 3-character pattern match is equivalent to an anchored one, and by this point
-    // the code has already been changed away from the "11[23]" shape whenever the elseif above
-    // fired - so this second check can now only re-evaluate a condition already known to be
-    // false. Ported as-is (mirrors upstream, including its redundancy) rather than dropped.
-    const codeAfterFirstPass = codeKey(warning.code);
-
-    if (
-      /11[23]/.test(codeAfterFirstPass) &&
-      getFieldStatus(normalizedOptions, warning, 1) !== "undefined"
-    ) {
-      warning.code = Number("14" + codeAfterFirstPass[2]);
+    if (warning.code === 112 || warning.code === 113) {
+      if (
+        getFieldStatus(normalizedOptions, warning, 1) !== "undefined"
+      ) {
+        warning = toUndefinedFieldGlobalWarning(warning);
+      }
     }
 
     if (passesFilter(normalizedOptions, warning)) {

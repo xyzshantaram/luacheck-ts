@@ -43,7 +43,7 @@ function checkLine(
       : "^[^\r\n]-()[ \t\f\v]+()[\r\n]";
 
     const result = chstate.source.find(trailingWsPattern, lineOffset);
-    let trailingWsCode: number | undefined;
+    let trailingWsCode: 611 | 612 | 613 | 614 | undefined;
 
     if (result) {
       // The two `()` position captures always yield numbers for this pattern.

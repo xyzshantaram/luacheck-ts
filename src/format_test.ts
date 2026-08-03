@@ -83,19 +83,24 @@ Deno.test("format.getMessage", async (t) => {
   );
 
   await t.step("throws on an unknown warning code", () => {
-    const warning: Warning = { code: 9999, line: 1, column: 1, end_column: 1 };
+    const warning = {
+      code: 9999,
+      line: 1,
+      column: 1,
+      end_column: 1,
+    } as unknown as Warning;
     assertThrows(() => getMessage(warning));
   });
 
   await t.step(
     "throws when a field referenced by the message format is missing from the warning",
     () => {
-      const warning: Warning = {
+      const warning = {
         code: 631,
         line: 1,
         column: 1,
         end_column: 85,
-      };
+      } as unknown as Warning;
       assertThrows(() => getMessage(warning));
     },
   );

@@ -13,7 +13,7 @@
  * against the placeholder, and `deno test` failing there is expected.
  */
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { checkStateNew } from "../check_state.ts";
 import { run as parseRun } from "./parse.ts";
 import { run as unwrapParensRun } from "./unwrap_parens.ts";
@@ -136,12 +136,13 @@ Deno.test("run - unknown option name warns 021 with the offending comment's mess
 
   assertEquals(chstate.inlineOptions, []);
   assertEquals(chstate.warnings.length, 1);
-  assertEquals(chstate.warnings[0].code, 21);
-  assertEquals(chstate.warnings[0].line, 1);
-  assertEquals(chstate.warnings[0].column, column);
-  assertEquals(chstate.warnings[0].end_column, endColumn);
+  const warning = chstate.warnings[0];
+  assert(warning.code === 21);
+  assertEquals(warning.line, 1);
+  assertEquals(warning.column, column);
+  assertEquals(warning.end_column, endColumn);
   assertEquals(
-    chstate.warnings[0].msg,
+    warning.msg,
     "unknown inline option 'bogus_option'",
   );
 });

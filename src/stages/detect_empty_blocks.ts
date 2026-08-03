@@ -26,7 +26,7 @@ export const warnings: Record<
 function checkBlock(
   chstate: CheckStateInstance,
   block: AstNode,
-  code: number,
+  code: 541 | 542,
 ): void {
   if (astLen(block) === 0) {
     chstate.warnRange(code, block as Range);

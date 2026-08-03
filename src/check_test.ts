@@ -59,7 +59,7 @@
  * `check` is expected.
  */
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import type { Warning } from "./check_state.ts";
 import { check, type CheckResult } from "./check.ts";
 
@@ -749,7 +749,7 @@ Deno.test("check", async (t) => {
       assertEquals(report.warnings.length, 1);
 
       const warning = report.warnings[0];
-      assertEquals(warning.code, 11);
+      assert(warning.code === 11);
       assertEquals(typeof warning.line, "number");
       assertEquals(typeof warning.column, "number");
       assertEquals(typeof warning.end_column, "number");
@@ -765,7 +765,7 @@ Deno.test("check", async (t) => {
       assertEquals(report.warnings.length, 1);
 
       const warning = report.warnings[0];
-      assertEquals(warning.code, 11);
+      assert(warning.code === 11);
       assertEquals(warning.prev_line, 1);
       assertEquals(typeof warning.prev_column, "number");
       assertEquals(typeof warning.prev_end_column, "number");

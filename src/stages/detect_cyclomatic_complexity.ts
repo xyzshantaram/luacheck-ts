@@ -50,6 +50,11 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 }
 
 function cyclomaticComplexityMessageFormat(warning: Warning): string {
+  // Registered for code 561 only.
+  if (warning.code !== 561) {
+    return "cyclomatic complexity is too high ({complexity} > {max_complexity})";
+  }
+
   let functionDescr: string;
 
   if (warning.function_type === "main_chunk") {
@@ -73,7 +78,12 @@ interface WarningEntry {
 export const warnings: Record<string, WarningEntry> = {
   "561": {
     message_format: cyclomaticComplexityMessageFormat,
-    fields: ["complexity", "function_type", "function_name"],
+    fields: [
+      "complexity",
+      "function_type",
+      "function_name",
+      "max_complexity",
+    ],
   },
 };
 

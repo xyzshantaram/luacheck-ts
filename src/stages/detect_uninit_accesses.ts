@@ -33,7 +33,7 @@ function warnUninitAccesses(
   chstate: CheckStateInstance,
   item: EvalItem | LocalItem | SetItem,
   itemVarMap: Map<Var, AstNode[]>,
-  code: number,
+  code: 321 | 341,
 ): void {
   for (const [variable, accessingNodes] of itemVarMap) {
     // If there are no values at all reaching this access, not even the empty one,

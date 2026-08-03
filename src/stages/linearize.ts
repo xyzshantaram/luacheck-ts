@@ -126,13 +126,26 @@ export const warnings: Record<
 export type VarKind = "var" | "arg" | "loop" | "loopi";
 export type ValueKind = VarKind | "func";
 
-const typeCodes: Record<string, string> = {
+/** Middle and last digit of the nine redefinition warning codes 411-433. */
+const redefinedCodes = {
+  "11": 411,
+  "12": 412,
+  "13": 413,
+  "21": 421,
+  "22": 422,
+  "23": 423,
+  "31": 431,
+  "32": 432,
+  "33": 433,
+} as const;
+
+const typeCodes = {
   var: "1",
   func: "1",
   arg: "2",
   loop: "3",
   loopi: "3",
-};
+} as const;
 
 const pseudoLabels = arrayToSet(["do", "else", "break", "end", "return"]);
 
@@ -325,14 +338,14 @@ function warnRedefined(
     : variable.line === prevVar.line
     ? "2"
     : "3";
-  const code = Number(`4${middleDigit}${typeCodes[prevVar.type]}`);
+  const code = redefinedCodes[`${middleDigit}${typeCodes[prevVar.type]}`];
 
   chstate.warnVar(
     code,
     { node: variable.node as Range, name: variable.name },
     compact({
-      self: variable.self && prevVar.self,
-      prev_line: prevVar.node.line,
+      self: variable.self === true && prevVar.self === true ? true : undefined,
+      prev_line: prevVar.node.line as number,
       prev_column: chstate.offsetToColumn(
         prevVar.node.line as number,
         prevVar.node.offset as number,

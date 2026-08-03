@@ -35,7 +35,8 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 }
 
 function unusedFieldValueMessageFormat(warning: Warning): string {
-  const target = warning.index ? "index" : "field";
+  // Registered for code 314 only.
+  const target = warning.code === 314 && warning.index ? "index" : "field";
   return `value assigned to ${target} {field!} is overwritten on line {overwritten_line} before use`;
 }
 
@@ -61,7 +62,7 @@ function warnUnusedFieldValue(
   chstate: CheckStateInstance,
   node: AstNode,
   fieldRepr: string | undefined,
-  isIndex: boolean | undefined,
+  isIndex: true | undefined,
   overwritingNode: AstNode,
 ): void {
   const overwritingRange = overwritingNode as Range;
