@@ -1014,27 +1014,70 @@ user decision made after ticket 7.1 landed.
 **Status:** pending
 
 Last phase of this plan. Grilled after Phase 4 landed, alongside the Phase 5 ticket
-breakdown. Cleans up Lua-flavored patterns the mechanical hand-port strategy left behind,
-now that behavior across the whole pipeline is locked in by the ported test suite. The public
-API surface is fair game for tightening here too (this all happens pre-1.0), not just
-internals. Five independent tickets, one per category; run the full `deno task test`/`lint`/
-`fmt:check`/`check` suite plus `git status --short` after each before starting the next -
-these tickets touch already-tested code across a nontrivial slice of the codebase, even with
-`AstNode` excluded (see note below), so no batched, unverified sweep across categories.
+breakdown, and re-grilled after Phase 7 closed once actual call sites could be checked
+against the codebase. Cleans up Lua-flavored patterns the mechanical hand-port strategy left
+behind, now that behavior across the whole pipeline is locked in by the ported test suite.
+None of this phase's tickets touch the public API surface exported by `mod.ts` - every
+object/utility ticketed below is internal-only. Run the full `deno task test`/`lint`/
+`fmt:check`/`check` suite plus `git status --short` after each ticket before starting the
+next - these tickets touch already-tested code across a nontrivial slice of the codebase,
+even with `AstNode` excluded (see note below), so no batched, unverified sweep across tickets.
 
-- [ ] Ticket 8.1: `class()`-style fake classes (`utils.ts`'s `classImpl`/`LuaConstructor`
-      metatable-construction shim, used for `Stack`, `SyntaxError`, and other `class()`-based
-      Lua objects) → real ES classes.
-- [ ] Ticket 8.2: Lua-emulation utility shims in `utils.ts` that duplicate native JS/TS
-      behavior without genuine Lua-pattern-specific semantics (`ripairs`, `sortedPairs`, `map`,
-      etc.) → native array/object equivalents, at every call site.
-- [ ] Ticket 8.3: `utils.try`/`ErrorWrapperImpl` (pcall-with-multi-return emulation) → native
-      `try`/`catch` at call sites that do not actually need Lua's multi-return-on-success
-      semantics.
-- [ ] Ticket 8.4: `arrayToSet` call sites that only ever check membership (the stored 1-based
-      index value is never read) → native `Set<string>`.
-- [ ] Ticket 8.5: Multi-return-value patterns currently typed as loose arrays → real TS tuple
-      types, where doing so does not change already-tested behavior.
+Re-grilling, done directly against the codebase rather than from memory, found two of the
+five originally drafted tickets targeted dead code instead of real call sites, and one had no
+remaining targets at all:
+- Ticket 8.3's `try`/`ErrorWrapperImpl` and ticket 8.2's `map` shim both have zero call sites
+  anywhere in `src/` outside their own definitions and unit tests. Both are now framed as
+  deletions, not conversions.
+- The original ticket 8.5 (loose-array multi-returns to real TS tuples) was checked by a
+  dispatched `researcher` pass: every multi-return function in `src/` already carries an
+  explicit tuple return type. The three remaining loose-array returns (`lua_pattern.ts`'s
+  capture functions, `tryImpl`'s pcall-arity rest) have genuinely variable arity, so a fixed
+  tuple would misrepresent them, not tighten them. Zero real candidates found - ticket
+  dropped entirely.
+- The original ticket 8.1 splits into two: the six simpler `classImpl`-based objects, and
+  `CheckState` on its own, since `CheckState` is read and written by all 18 stage modules and
+  is by far the highest-risk conversion in this set.
+
+Five tickets remain, ordered dead-code deletions first, then mechanical conversions, then the
+two class conversions with the riskiest one last.
+
+- [ ] Ticket 8.1: Delete `utils.ts`'s unused `try`/`ErrorWrapperImpl`/`tryImpl`/`errorHandler`/
+      `ErrorWrapperInstance` (pcall-with-multi-return emulation) and its unit test. Zero call
+      sites exist anywhere in `src/` outside its own definition and test.
+  - Eval: `grep -rn` for `tryImpl`/`ErrorWrapperImpl`/`errorHandler` across `src/` returns
+    nothing; full `deno task test`/`lint`/`fmt:check`/`check` clean, test count drops by
+    exactly the removed `try`/`ErrorWrapperImpl` steps and nothing else; `git status --short`
+    matches the expected file set.
+- [ ] Ticket 8.2: Convert `ripairs` (5 call sites) and `sortedPairs` (1 call site), both in
+      `options.ts`, to native reverse-iteration/`Object.keys().sort()` equivalents at each
+      call site. Delete `utils.ts`'s `map` shim and its unit test - zero call sites anywhere
+      in `src/` outside its own definition and test.
+  - Eval: `grep -rn` for `ripairs`/`sortedPairs`/`\bmap\(` (excluding `.map(`) across `src/`
+    returns nothing outside `options.ts`'s converted call sites; `options_test.ts`'s existing
+    assertions pass unchanged; full suite clean; `git status --short` matches expected files.
+- [ ] Ticket 8.3: Convert all 9 `arrayToSet` call sites (`check.ts`, `parser.ts`,
+      `core_utils.ts` x2, `stages/parse_inline_options.ts`, `stages/detect_unused_locals.ts`,
+      `stages/linearize.ts`, `stages/detect_globals.ts`, `stages/init.ts`) to `Set<string>` and
+      `.has()`. Confirmed by direct inspection: every one of the 9 sites only ever checks
+      membership, never reads the returned 1-based index value, so the conversion is uniform
+      across all of them with no per-site exceptions.
+  - Eval: `grep -rn arrayToSet` across `src/` returns nothing; `stages/init.ts`'s
+    `StageWarningMeta.fields_set` field retypes to `Set<string>` (internal-only type, not
+    re-exported by `mod.ts`); full suite clean; `git status --short` matches expected files.
+- [ ] Ticket 8.4: Convert the six simpler `classImpl`-based objects - `Stack` (`utils.ts`),
+      `SyntaxError`, `UnpairedTokenGuesser` (`parser.ts`), `Line`, `LinState`
+      (`stages/linearize.ts`), `CyclomaticComplexityMetric`
+      (`stages/detect_cyclomatic_complexity.ts`) - to real ES classes. `CheckState` is
+      deliberately excluded from this ticket; it gets its own (ticket 8.5).
+  - Eval: `grep -rn classImpl` across `src/` shows only `CheckState`'s remaining use; full
+    suite clean; `git status --short` matches expected files.
+- [ ] Ticket 8.5: Convert `CheckState` (`check_state.ts`) from `classImpl` to a real ES class.
+      Highest-risk conversion in this phase: read and written by all 18 stage modules.
+  - Eval: `grep -rn classImpl` across `src/` returns nothing; full suite clean; **plus an
+    independent spot-check beyond the automated suite** of a few stage modules that read/write
+    `CheckState` fields directly, confirming field access behaves identically after the class
+    conversion; `git status --short` matches expected files.
 
 **Explicitly out of scope, deferred:** restructuring `AstNode` (`parser.ts`)'s `node["1"]`/
 `node["2"]`/`node["3"]` positional-key shape into a real discriminated union with named fields

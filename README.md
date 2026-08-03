@@ -47,6 +47,10 @@ This package ports luacheck's check engine only. It does not port the `luacheck`
 - **No config file support.** This package does not load `.luacheckrc` files, detect rockspecs, or cache results.
 - **Limited `std` presets.** The `std` option accepts only the `lua54` and `lua54c` presets. Upstream's other Lua version presets and standard library lists are not ported.
 
+## Acknowledgments
+
+This package is an LLM-generated port of [luacheck](https://github.com/mpeterv/luacheck), produced by going through the original source line by line rather than using automated source translation. Peter Melnichenko created luacheck and maintains it with contributors. All credit for the design of the checks and the original Lua implementation belongs to them.
+
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE). LICENSE also includes the original luacheck license, since this package is a direct port of that code.
