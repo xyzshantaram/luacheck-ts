@@ -574,7 +574,7 @@ Phase 3 baseline).
 
 ## Phase 5 — check.lua + filter.lua + init.lua (compose + public API)
 
-**Status:** in_progress
+**Status:** done
 
 Composes everything above into `check(source)` and the public `get_report`/`check_strings`
 API. Depends on Phase 4. Ticket boundaries grilled after Phase 4 landed. `format.lua` (336
@@ -726,10 +726,50 @@ mark unreadable files; `checkStrings(sources: string[], opts?)` takes strings on
     ticket 4.2's precedent). All three fixture-value substitutions above were caught by actually
     running the ported tests and reading the resulting failures against the vendored Lua source,
     not decided upfront.
-- [ ] Ticket 5.3: Port top-level `init.lua`'s public API (`getReport`/`processReports`/
-      `checkStrings`/`getMessage`) into `src/mod.ts`, replacing its current placeholder in place
-      (not a new file). Solo, final ticket of the phase - needs `check.ts` (5.1), `filter.ts`
-      (5.2), and the `format.ts` message-templating core (5.1) all to exist first.
+- [x] Ticket 5.3: Ported top-level `init.lua`'s public API (135 lines, → `src/mod.ts`, 195
+      lines) into `src/mod.ts`, replacing its placeholder in place (not a new file). Solo,
+      implemented directly, same treatment as `filter.ts` in ticket 5.2 - no split test-writing
+      dispatch. Ported `luacheck_spec.lua` (598 lines) as `src/mod_test.ts` (489 lines): one
+      `Deno.test` per `describe` block (`check_strings`, `get_report`, `process_reports`,
+      `get_message`), one `t.step` per `it`.
+  - The spec's outer `describe("luacheck", ...)` block (the `check_files`/callable-module form)
+      is not ported: both were already decided out of scope before this ticket started (Phase 5's
+      own header note, restated in `mod.ts`'s own header). `check_strings`'s "ignores tables with
+      .fatal field" step has no equivalent either, for the same reason - nothing can construct a
+      `{fatal, msg}` item once `checkFiles` is gone, so there is nothing to test. `checkStrings`'s
+      per-item bad-argument message drops "or tables" from upstream's wording for the same
+      reason ("array of strings expected", not "array of strings or tables expected").
+  - `getReport`/`processReports`/`checkStrings`/`getMessage` each open with the same runtime
+      argument-type check upstream's `assert`-based guards perform (`luaType(x) !== "..."` ->
+      throw an `Error` with upstream's exact `"bad argument #N to '...'"` message text) despite
+      each already carrying a TS parameter type - a deliberate exception to "don't validate what
+      can't happen", since these four functions are this port's actual public API boundary
+      (`deno.json`'s `exports` field points straight at `mod.ts`), and a JSR consumer can call
+      into them from untyped JS exactly the way Lua callers could, same as `options.validate`'s
+      own existing runtime checks one layer down.
+  - `processReports`/`checkStrings`'s own option-stack validation (`rawValidateOptions`/
+      `validateOptions`) is a direct, faithful port of `init.lua`'s `raw_validate_options`/
+      `validate_options` - same three-level structure (`opts` itself, `opts[i]` per report/string
+      index, `opts[i][j]` for that entry's own array part) and the same error-message text,
+      reusing `options.ts`'s own `allOptions`/`validate` exports (ticket "5.1"-adjacent, already
+      in place since Phase 5 started).
+  - `process_reports`'s "uses options" step passes `std = "none"` upstream; this port's std
+      presets are trimmed to `lua54`/`lua54c` only (see `builtin_standards.ts`), so it is ported
+      with `std: {}` (an empty std table) - the same substitution `filter_test.ts` already used
+      in ticket 5.2 for the same reason.
+  - No `_VERSION` export: upstream's `luacheck._VERSION = "1.2.0"` is vendored-source metadata,
+      not part of the warning-data contract the four ported functions serve, and nothing in
+      `luacheck_spec.lua` exercises it - left out rather than added speculatively.
+  - Eval: whole-project `deno test` (77 tests/339 steps, up from 73/321), `deno lint`,
+    `deno fmt --check` all clean; `deno check src/mod.ts src/mod_test.ts` clean; `deno task build`
+    (the browser bundle, `dist/luacheck-ts.bundle.js`, git-ignored) still builds cleanly from the
+    now-real `mod.ts` entrypoint (81.25KB); `git status --short` matched the expected file set
+    exactly - `src/mod.ts`/`src/mod_test.ts` modified in place, nothing else. Every fixture value
+    in `mod_test.ts` (location numbers, `indexing`, message text) passed against the real
+    pipeline on the first run, no adjustment needed after writing it against the vendored spec.
+
+Phase 5 is now complete: `check.ts`, `filter.ts`, and the public API in `mod.ts` all exist,
+composed, tested, and verified.
 
 ## Phase 6 — Remaining integration specs
 
