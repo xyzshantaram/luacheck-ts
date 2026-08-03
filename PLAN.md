@@ -790,9 +790,108 @@ Every other upstream spec file (`cache_spec.lua`, `cli_spec.lua`, `config_spec.l
 covers CLI/filesystem/config code already out of scope for this port. No spec file remains
 unported. This phase closes with no new ticket.
 
-## Phase 7 — Public API polish + bundle-size measurement
+## Phase 6.5 — Parity analysis (reusable benchmark tool)
 
 **Status:** pending
+
+Grilled after ticket 7.1 landed, when the user asked to benchmark the TS port against real
+luacheck on real Lua codebases before shipping - both for correctness (does the port produce
+the same warnings as upstream on code nobody wrote test fixtures for) and speed, as a
+reusable tool rather than a one-off script. Decimal-numbered rather than renumbering Phases
+7/8 to 8/9, per explicit user decision. Per explicit user decision, **this phase gates all of
+Phase 7**: tickets 7.2/7.3 stay paused until Phase 6.5 closes, and if it finds a genuine
+behavioral mismatch (not a methodology artifact), the mismatch gets fixed in the relevant
+`src/` file within this phase before it can close - not just documented and deferred.
+
+Ground-truth method (explicit user decision over a direct-API-call alternative): install the
+real `luacheck` 1.2.0 rock (matching this port's own vendored source pin exactly) via
+`luarocks`, and run its actual CLI end to end - not a hand-rolled driver calling
+`check_strings` directly - since the CLI exercises the full real-world tool people actually
+use. Real luacheck 1.2.0 has no JSON formatter (only TAP/JUnit/visual_studio/plain/default
+text formats), but does support `--formatter <lua module>`, a plugin hook: a module
+implementing `format(report, filenames, options)` that returns a string. This phase writes a
+small custom formatter module (a hand-written JSON encoder, no third-party deps) so the raw
+per-file warning data - already rendered through `luacheck.get_message`, since ticket 6.5.3
+compares on rendered message text plus line/column, not full field-for-field identity, per
+explicit user decision - comes out as parseable JSON instead of colored text, while the CLI's
+own option-resolution/filtering pipeline runs completely untouched.
+
+Corpus (explicit user decision - "commit a fixed, small corpus" over "point the tool at any
+directory"): three small, popular, MIT-licensed, single-file Lua libraries, vendored verbatim
+from a pinned commit (not a moving `master` reference - see
+`parity-analysis/corpus/ATTRIBUTION.md`) under `parity-analysis/corpus/`, picked for
+stylistic diversity - `lume` (rxi/lume, 780 lines, functional utility library),
+`inspect.lua` (kikito/inspect.lua, 377 lines, recursive pretty-printer with metatables and
+conditional-`require` patterns), `middleclass` (kikito/middleclass, 193 lines, OOP/metatable
+class framework). 1350 lines total (the initial estimate before actually fetching the files
+was ~960; corrected here to the real vendored line counts, `lume` in particular having grown
+since the estimate was made).
+
+Both engines are checked with `--std lua54` (real luacheck) / `{ std: "lua54" }` (the TS
+port) forced uniformly, real luacheck also with `--no-config --no-cache` - explicit user
+decision, since this port only implements the `lua54` std preset, so letting either side fall
+back to its own natural default (real luacheck's is `max`) would produce differences that are
+just default-option mismatches, not genuine porting bugs. `parity-analysis/` lives as a new
+top-level directory, sibling to `src/` - explicit user decision over reusing `.reference/` -
+not part of the JSR-published package (`deno.json`'s `exports` already points only at
+`src/mod.ts`, so this is naturally excluded without further config). The real-luacheck side's
+dependencies (`luarocks install --tree parity-analysis/.luarocks luacheck 1.2.0`, which pulls
+in `argparse`/`luafilesystem` - the latter has a compiled C extension, not portable) are
+installed into a git-ignored local tree via a setup script, not committed.
+
+Three tickets, dispatched to `coder` with a `researcher`/review-skill pass after each, per
+explicit user decision (meaningful new code across two languages plus shell wiring, not
+mechanical enough for direct implementation despite the research legwork already being done).
+6.5.1 and 6.5.2 have no dependency on each other (both only need the corpus vendored, which is
+part of 6.5.1); 6.5.3 needs both.
+
+- [x] Ticket 6.5.1: Vendored the three-library corpus into `parity-analysis/corpus/` (each
+      file plus `ATTRIBUTION.md`: source URL, license, and the exact commit SHA fetched -
+      pinned, not a moving `master` reference). Wrote `parity-analysis/lua/json_formatter.lua`:
+      a `luacheck --formatter` module (hand-written JSON encoder, no dependencies) that renders
+      each warning's message via `luacheck.get_message` and emits `{ filename, warnings: [{
+      code, line, column, message }, ...] }` per file. Wrote `parity-analysis/setup.sh`
+      (idempotent) plus `parity-analysis/lua/env.sh` (sourced, not executed) to install real
+      luacheck 1.2.0 and its CLI dependencies (`argparse`, `luafilesystem`) into a git-ignored
+      local `luarocks` tree and wire up `LUA_PATH`/`LUA_CPATH`/`PATH` for it.
+  - Dispatched to `coder`, then reviewed via the `researcher`/review skill per this phase's
+    dispatch decision. The review found two real gaps, both fixed directly afterward (not by
+    a second coder dispatch, given their small size): `ATTRIBUTION.md` cited only "master"
+    with no commit pin, so the corpus was not actually reproducible - fixed by resolving each
+    repository's current commit SHA, re-fetching each file at that exact SHA, confirming a
+    byte-identical diff against the already-vendored copy, and recording the SHA in
+    `ATTRIBUTION.md`. This phase's own line-count estimates (written before the corpus was
+    actually fetched) were stale, `lume` in particular having grown since the estimate -
+    corrected above to the real counts (780/377/193, 1350 total, not the original ~450/330/
+    180/~960 guess). The review's remaining notes (`setup.sh`'s version-unaware skip guard,
+    no `luarocks`-on-`PATH` precheck, `env.sh`'s harmless `LUA_PATH` duplication on re-source,
+    non-ASCII bytes passing through the JSON encoder unescaped) were left as-is - real but
+    low-value for a project-scoped, git-ignored, ASCII-only-corpus harness script, not the
+    kind of gap this phase's "fix real discrepancies before closing" rule was aimed at (that
+    rule is about TS-port-vs-luacheck behavioral parity, not this harness's own polish).
+  - Eval: independently re-ran (not just trusted the report) `luacheck --formatter
+    json_formatter --std lua54 --no-config --no-cache parity-analysis/corpus/middleclass.lua`
+    after sourcing `env.sh`, confirmed real, valid JSON output in the expected shape.
+- [ ] Ticket 6.5.2: Write `parity-analysis/ts/run.ts`: for each corpus file, calls
+      `checkStrings([content], { std: "lua54" })`, renders each warning via `getMessage`, and
+      emits the same `{ filename, warnings: [{ code, line, column, message }, ...] }` JSON
+      shape as 6.5.1's formatter, so the orchestrator can treat both sides identically.
+  - Eval: `deno run` against one corpus file prints valid JSON matching 6.5.1's shape.
+- [ ] Ticket 6.5.3: Write the orchestrator (a single reusable command - shell script or `deno
+      task`) that runs both sides against every corpus file, times each side, and diffs
+      per-file warnings sorted by location, comparing `message`/`line`/`column` per the
+      comparison semantics decided above. Reports per-file pass/fail, any concrete mismatches,
+      and an aggregate real-luacheck-vs-TS-port timing summary. Then actually run it against
+      the full three-file corpus and record the real result - pass/fail per file, any genuine
+      discrepancies found (and their fix, per this phase's own gating rule above), and the
+      timing numbers - in this ticket's done-note. The real output is the deliverable, not
+      just the tool's existence.
+  - Eval: the whole pipeline runs end to end from a single command with no manual steps;
+    the done-note records the actual output from a real run, not a hypothetical one.
+
+## Phase 7 — Public API polish + bundle-size measurement
+
+**Status:** pending (blocked on Phase 6.5)
 
 Finalize the discriminated-union warning types, `@xyzshantaram/luacheck-ts` JSR publish
 config, README. Three tickets, grilled after Phase 6 closed. `stages/init.ts`'s
@@ -800,7 +899,8 @@ config, README. Three tickets, grilled after Phase 6 closed. `stages/init.ts`'s
 cross-checked against the actual construction sites in each stage module - a dedicated
 research pass (see ticket 7.1's own notes) found the registry disagrees with runtime
 reality for several codes. Ticket 7.2 can start once 7.1's types exist; 7.3 has no
-dependency on either.
+dependency on either. **Tickets 7.2 and 7.3 are paused until Phase 6.5 closes**, per explicit
+user decision made after ticket 7.1 landed.
 
 - [x] Ticket 7.1: Replaced `check_state.ts`'s loose `Warning` interface (a single shape with
       a `[key: string]: unknown` index signature) with a real discriminated union in a new

@@ -11,5 +11,8 @@ dist/
 # Scratch vendoring dir for the upstream luacheck 1.2.0 clone (never committed)
 .reference/
 
+# Local luarocks tree for the real-luacheck parity harness (installed by parity-analysis/setup.sh)
+parity-analysis/.luarocks/
+
 # OS junk
 .DS_Store
