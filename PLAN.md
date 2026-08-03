@@ -914,7 +914,7 @@ part of 6.5.1); 6.5.3 needs both.
 
 ## Phase 7 — Public API polish + bundle-size measurement
 
-**Status:** pending (unblocked - Phase 6.5 closed clean, no genuine mismatch found)
+**Status:** done
 
 Finalize the discriminated-union warning types, `@xyzshantaram/luacheck-ts` JSR publish
 config, README. Three tickets, grilled after Phase 6 closed. `stages/init.ts`'s
@@ -992,20 +992,21 @@ user decision made after ticket 7.1 landed.
     81.25KB); `git status --short` matched the expected file set - `src/warnings.ts` new,
     `check_state.ts`/`check.ts`/`filter.ts`/`format.ts` plus 8 stage modules and 7 test files
     modified, nothing else.
-- [ ] Ticket 7.2: Write `README.md` from scratch (none exists yet) - install snippet plus a
-      minimal `checkStrings` usage example, and a scope/parity-notes section stating what
-      this port deliberately excludes vs upstream luacheck (no CLI, no file I/O, no
-      config/cache/rockspec handling, `lua54`-only std preset), so a JSR user does not
-      assume full CLI-luacheck parity. No warning-code reference table and no hand-written
-      full API reference in the README - JSR's own doc viewer covers exported
-      function/type signatures from existing JSDoc comments. Also finalize
-      `@xyzshantaram/luacheck-ts`'s `deno.json` publish config (add `description`/`license`
-      fields if `deno publish --dry-run` flags their absence; `.reference/`/`dist/` are
-      already git-ignored so already excluded from the publish set).
-  - Eval: README passes an `ste-writing` self-lint pass; `deno publish --dry-run
-    --allow-dirty` passes cleanly; a manual read-through by the user before commit.
-- [ ] Ticket 7.3: Run `deno task build`, gzip the resulting `dist/luacheck-ts.bundle.js`,
-      and record both the raw and gzipped size in this ticket's done-note. No hard ceiling -
+- [x] Ticket 7.2: Wrote `README.md` from scratch (none existed) - JSR/`npx jsr add` install
+      snippets, a `checkStrings` usage example, a pointer to the JSR page for the full API
+      reference instead of a hand-written one, and a scope section listing the four
+      deliberate CLI-parity exclusions (no CLI, no file I/O, no config/cache/rockspec
+      handling, `lua54`/`lua54c`-only std presets). No `deno.json` changes needed: `deno
+      publish --dry-run --allow-dirty` already passed cleanly without flagging missing
+      `description`/`license`, which was this ticket's own condition for touching that file.
+  - Eval: the README's usage example was run verbatim and its real output (2 warnings,
+    `{ warnings: 2, errors: 0, fatals: 0 }`) matches what the doc shows, not just asserted;
+    passed an `ste-writing` self-lint pass (no contractions/semicolons/passive voice/long
+    sentences in the prose); full `deno task test` still 77 passed/339 steps/0 failed, `deno
+    lint`/`deno check src/mod.ts` clean, `deno task build` still 82.85KB; `deno publish
+    --dry-run --allow-dirty` passes cleanly; user reviewed and approved the file before commit.
+- [x] Ticket 7.3: Ran `deno task build`, gzipped the resulting `dist/luacheck-ts.bundle.js`.
+      Raw size 84,838 bytes (82.85KB). Gzipped size 27,984 bytes (27.33KB). No hard ceiling -
       tracked for growth visibility only. Trivial, done directly, no dispatch.
 
 ## Phase 8 — Idiomatic TypeScript cleanup
