@@ -872,11 +872,24 @@ part of 6.5.1); 6.5.3 needs both.
   - Eval: independently re-ran (not just trusted the report) `luacheck --formatter
     json_formatter --std lua54 --no-config --no-cache parity-analysis/corpus/middleclass.lua`
     after sourcing `env.sh`, confirmed real, valid JSON output in the expected shape.
-- [ ] Ticket 6.5.2: Write `parity-analysis/ts/run.ts`: for each corpus file, calls
-      `checkStrings([content], { std: "lua54" })`, renders each warning via `getMessage`, and
-      emits the same `{ filename, warnings: [{ code, line, column, message }, ...] }` JSON
-      shape as 6.5.1's formatter, so the orchestrator can treat both sides identically.
-  - Eval: `deno run` against one corpus file prints valid JSON matching 6.5.1's shape.
+- [x] Ticket 6.5.2: Wrote `parity-analysis/ts/run.ts` (40 lines). One call - not one per file
+      per the original ticket text - `checkStrings(contents, { std: "lua54" })` over the full
+      array of file contents (one array holding every file argument's text), so it mirrors a
+      single real `luacheck <files...>` CLI invocation instead of one process per file. Each
+      report entry maps to `{ filename, warnings: [{ code, line, column, message }, ...] }`
+      via `getMessage`, matching 6.5.1's formatter shape field-for-field (key insertion order
+      differs - `code, line, column, message` here vs. the Lua encoder's alphabetical
+      `column, code, line, message` - but ticket 6.5.3's orchestrator compares parsed JSON, not
+      raw bytes, so this does not matter). Zero-argument invocations print `[]` with no special
+      branch needed, since `checkStrings([], ...)` already returns an empty report array.
+      `--allow-read=parity-analysis/corpus` is the documented invocation's permission scope
+      (the tightest scope that covers the corpus directory; wider paths need a wider flag,
+      acceptable for a dev-only script).
+  - Eval: independently re-ran `deno fmt --check`/`deno lint`/`deno check` on the new file (all
+    clean) and ran it myself against `middleclass.lua` - output is 5 warnings, all code 212
+    (unused-argument/unused-vararg cases), same lines and columns as the real luacheck run
+    already captured in ticket 6.5.1's done-note - a first cross-check that both sides agree,
+    ahead of 6.5.3's formal diff.
 - [ ] Ticket 6.5.3: Write the orchestrator (a single reusable command - shell script or `deno
       task`) that runs both sides against every corpus file, times each side, and diffs
       per-file warnings sorted by location, comparing `message`/`line`/`column` per the
