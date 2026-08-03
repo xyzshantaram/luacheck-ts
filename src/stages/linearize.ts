@@ -64,6 +64,24 @@ function arr(...items: AstValue[]): AstNode {
   return node;
 }
 
+/**
+ * Drops `undefined`-valued keys, mirroring how a Lua table constructor
+ * never creates a key assigned `nil` - unlike a JS object literal, which
+ * keeps the key with value `undefined`.
+ */
+function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const result: Partial<T> = {};
+
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+    if (value !== undefined) {
+      (result as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  return result;
+}
+
 function redefinedWarning(
   messageFormat: string,
 ): { message_format: string; fields: string[] } {
@@ -312,7 +330,7 @@ function warnRedefined(
   chstate.warnVar(
     code,
     { node: variable.node as Range, name: variable.name },
-    {
+    compact({
       self: variable.self && prevVar.self,
       prev_line: prevVar.node.line,
       prev_column: chstate.offsetToColumn(
@@ -323,7 +341,7 @@ function warnRedefined(
         prevVar.node.line as number,
         prevVar.node.endOffset as number,
       ),
-    },
+    }),
   );
 }
 

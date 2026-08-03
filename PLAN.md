@@ -571,12 +571,88 @@ Phase 3 baseline).
     `.reference/luacheck/src/luacheck/stages/init.lua` line by line, and found the one unused-
     import lint bug in the test file myself before accepting the work. Phase 4 is now complete:
     all 18 stage modules plus the registry exist, tested, and verified.
+
 ## Phase 5 — check.lua + filter.lua + init.lua (compose + public API)
 
-**Status:** pending
+**Status:** in_progress
 
 Composes everything above into `check(source)` and the public `get_report`/`check_strings`
-API. Depends on Phase 4.
+API. Depends on Phase 4. Ticket boundaries grilled after Phase 4 landed. `format.lua` (336
+lines) was not in the original phase scope but its top ~80 lines (`get_message_format`/
+`substitute`/`format_message`/`get_message`) are a real dependency of top-level `init.lua`'s
+`get_message`, so its trimmed message-templating core joins this phase; the CLI report-printing
+rest of `format.lua` (colored `Checking <file>` headers, counts, etc., lines ~82-336) stays out
+of scope, same rule already applied to `read_file`/`load`/`load_config`/`cli.lua`. Two public-API
+shapes deliberately deviate from strict 1:1 Lua mirroring, for consumer ergonomics, since this is
+the outermost, most user-facing layer of the whole port (everything below it stays a faithful
+mirror): `checkStrings`/`processReports` return a `[reports, counts]` tuple - `reports` a real JS
+array (each entry a real JS array of filtered `Warning` objects sorted by location, or a
+`{fatal, msg}` object), `counts` an object `{ warnings, errors, fatals }` - instead of the Lua
+shape's array-with-three-extra-named-properties-on-it. `checkFiles` (disk I/O, and the `luacheck`
+table's callable-invocation form built on it) is dropped entirely, no stub, no replacement
+callable - consistent with the browser-library scope decision. `checkStrings`'s input also drops
+the `{fatal, msg}` passthrough item shape that Lua's version only supported to let `check_files`
+mark unreadable files; `checkStrings(sources: string[], opts?)` takes strings only.
+
+- [x] Ticket 5.1: Ported `check.lua` (96 lines, → `src/check.ts`, 123 lines) + `format.lua`'s
+      trimmed message-templating core (`get_message_format`/`substitute`/`format_message`/
+      `get_message`, ~80 of 336 lines, → `src/format.ts`, 52 lines) together, both small and
+      independent of `filter.lua`. `format.ts` drops the `color` parameter and the ANSI-color
+      branch entirely (a CLI terminal concern, out of scope; the Lua source's own
+      `format.get_message` always calls with `color` unset anyway, so the color path is dead
+      code from this port's perspective). Added the small `inline_option_fields` export
+      `parse_inline_options.ts` was missing (`check.lua`'s `validate_fields` needs it) directly,
+      not via dispatch - a one-line mechanical copy of the Lua source's literal five-entry list.
+      `stages.warnings` (from ticket 4.8) keys entries by zero-padded 3-digit string code
+      (`"011"`, `"561"`); both `check.ts` and `format.ts` pad `Warning.code` (a plain number) to
+      3 digits before every lookup - the one non-mechanical wrinkle in an otherwise direct port,
+      caught by the implementation dispatch when `check_test.ts`'s inline-option-error and
+      syntax-error steps could not find their warning metadata without it.
+  - `check_spec.lua` (376 lines) exists and was ported in full - `check_full`/`check` helpers,
+      the utf8-locations case, the inline-options/line-lengths/line-endings case, and the
+      argparse-sample file-read case (reusing `lexer_test.ts`'s existing test-data convention).
+      Two hand-written steps cover `check.lua`'s syntax-error branch, which `check_spec.lua`
+      itself has no case for. `format_spec.lua` (206 lines) exists but only covers
+      `format.format`, the CLI report printer this port excludes - no case for `format.get_message`
+      in isolation, so `format_test.ts` is entirely hand-written against real warning codes from
+      already-ported stages (611, 631, 131, 561).
+  - Found and fixed two pre-existing bugs from earlier, already-committed tickets, surfaced by
+      this ticket's broader test coverage (neither was exercised by any earlier per-stage test):
+      (1) `stages/parse.ts` (ticket 4.1) never assigned `chstate.lineOffsets`/`lineLengths` when
+      `parser.parse()` throws mid-parse, since the port only read them off `parse()`'s return
+      value instead of upstream's pre-allocate-then-mutate-in-place out-param pattern - this
+      crashed `check.ts`'s syntax-error branch inside `offsetToColumn`. Fixed by pre-allocating
+      and passing the same out-param arrays `parser.parse()` already accepted but this call site
+      never supplied. (2) `stages/linearize.ts:316` (ticket 4.2) built a warning object with a
+      literal `self: variable.self && prevVar.self` entry, which in Lua assigns/omits `nil` as
+      "no key" but in JS creates a real, enumerable `self: undefined` key - broke `assertEquals`
+      on 4 redefinition-warning test cases. Fixed with a local `compact()` helper (this port's
+      existing convention for exactly this pattern, already used independently in
+      `detect_unused_fields.ts`/`detect_unused_locals.ts`/`detect_cyclomatic_complexity.ts`/
+      `detect_globals.ts` - `compact()` is now duplicated a 5th time across the codebase, flagged
+      here as a candidate for Phase 8's utility-shim-consolidation ticket rather than refactored
+      now, out of this ticket's scope).
+  - Eval: whole-project `deno test` (72 tests/305 steps, up from 70/272), `deno lint`,
+    `deno fmt --check`, `deno check` all clean; `git status --short` matched the expected file
+    set exactly - `src/check.ts`/`src/check_test.ts`/`src/format.ts`/`src/format_test.ts` new,
+    `src/stages/parse_inline_options.ts` (the `inlineOptionFields` addition, done directly) plus
+    `src/stages/parse.ts`/`src/stages/linearize.ts` (the two bug fixes) modified, nothing else.
+  - Note: dispatched as two `build` subagent calls (test-writing, then implementation), per this
+    phase's split-dispatch convention; the two pre-existing-bug fixes were dispatched as a
+    resumed follow-up to the same implementation session (same `task_id`) after independently
+    verifying the bug reports myself against the actual failing test output before authorizing
+    the fix, rather than accepting the report on trust. Independently re-ran the full
+    test/lint/fmt/check suite and `git status` after, and read `check.ts`/`format.ts` plus both
+    bug-fix diffs end to end against the vendored Lua source before accepting the work.
+- [ ] Ticket 5.2: Port `filter.lua` (544 lines) solo, implemented directly (no separate
+      test-writing dispatch), same treatment as `linearize.ts` in ticket 4.2, given its size and
+      the coupling between its two internal halves (per-warning rule matching plus
+      non-global-related filtering around lines 9-400; cross-file global-related filtering around
+      lines 400-526) through the final `filter.filter` driver. No dependency on Ticket 5.1.
+- [ ] Ticket 5.3: Port top-level `init.lua`'s public API (`getReport`/`processReports`/
+      `checkStrings`/`getMessage`) into `src/mod.ts`, replacing its current placeholder in place
+      (not a new file). Solo, final ticket of the phase - needs `check.ts` (5.1), `filter.ts`
+      (5.2), and the `format.ts` message-templating core (5.1) all to exist first.
 
 ## Phase 6 — Remaining integration specs
 
@@ -593,6 +669,41 @@ correctness pass.
 Finalize the discriminated-union warning types, `@xyzshantaram/luacheck-ts` JSR publish
 config, README. Eval: report gzipped bundle size after `deno task build`; no hard ceiling,
 tracked only.
+
+## Phase 8 — Idiomatic TypeScript cleanup
+
+**Status:** pending
+
+Last phase of this plan. Grilled after Phase 4 landed, alongside the Phase 5 ticket
+breakdown. Cleans up Lua-flavored patterns the mechanical hand-port strategy left behind,
+now that behavior across the whole pipeline is locked in by the ported test suite. The public
+API surface is fair game for tightening here too (this all happens pre-1.0), not just
+internals. Five independent tickets, one per category; run the full `deno task test`/`lint`/
+`fmt:check`/`check` suite plus `git status --short` after each before starting the next -
+these tickets touch already-tested code across a nontrivial slice of the codebase, even with
+`AstNode` excluded (see note below), so no batched, unverified sweep across categories.
+
+- [ ] Ticket 8.1: `class()`-style fake classes (`utils.ts`'s `classImpl`/`LuaConstructor`
+      metatable-construction shim, used for `Stack`, `SyntaxError`, and other `class()`-based
+      Lua objects) → real ES classes.
+- [ ] Ticket 8.2: Lua-emulation utility shims in `utils.ts` that duplicate native JS/TS
+      behavior without genuine Lua-pattern-specific semantics (`ripairs`, `sortedPairs`, `map`,
+      etc.) → native array/object equivalents, at every call site.
+- [ ] Ticket 8.3: `utils.try`/`ErrorWrapperImpl` (pcall-with-multi-return emulation) → native
+      `try`/`catch` at call sites that do not actually need Lua's multi-return-on-success
+      semantics.
+- [ ] Ticket 8.4: `arrayToSet` call sites that only ever check membership (the stored 1-based
+      index value is never read) → native `Set<string>`.
+- [ ] Ticket 8.5: Multi-return-value patterns currently typed as loose arrays → real TS tuple
+      types, where doing so does not change already-tested behavior.
+
+**Explicitly out of scope, deferred:** restructuring `AstNode` (`parser.ts`)'s `node["1"]`/
+`node["2"]`/`node["3"]` positional-key shape into a real discriminated union with named fields
+per tag. Confirmed to be the single highest-value, highest-cost item of this kind - `AstNode`
+is purely internal (never part of the public output format, unlike `Warning`), but is read via
+positional numeric keys in essentially every one of the 18 stage files, so restructuring it
+would touch all of them a second time. Deferred to its own separate, post-0.1.0 multi-phase
+plan, tracked outside this document.
 
 ## Human review queue
 

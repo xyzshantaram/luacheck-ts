@@ -39,6 +39,15 @@ export const warnings: Record<
   "023": { message_format: "unpaired pop directive", fields: [] },
 };
 
+/** The field set of one `chstate.inlineOptions` entry, used by check.ts to validate inline-option events. */
+export const inlineOptionFields = [
+  "line",
+  "pop_count",
+  "options",
+  "column",
+  "end_column",
+];
+
 const limitOpts = arrayToSet([
   "max_line_length",
   "max_code_line_length",
