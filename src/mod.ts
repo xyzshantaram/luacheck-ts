@@ -22,9 +22,11 @@ import type { Warning } from "./check_state.ts";
 import { check, type CheckResult } from "./check.ts";
 import { filter } from "./filter.ts";
 import { allOptions, type Options, validate } from "./options.ts";
-import type { StdTable } from "./standards.ts";
+import type { FieldDef, FieldsTable, StdTable } from "./standards.ts";
 import { getMessage as formatGetMessage } from "./format.ts";
 import { luaType } from "./utils.ts";
+
+export type { CheckResult, FieldDef, FieldsTable, Options, StdTable, Warning };
 
 export interface Counts {
   warnings: number;
