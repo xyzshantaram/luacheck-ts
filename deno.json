@@ -1,6 +1,7 @@
 {
   "name": "@xyzshantaram/luacheck-ts",
   "version": "0.1.1",
+  "license": "MIT",
   "exports": "./src/mod.ts",
   "tasks": {
     "build": "deno bundle --platform=browser --minify --format=esm -o dist/luacheck-ts.bundle.js src/mod.ts",
